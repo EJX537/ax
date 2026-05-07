@@ -1,0 +1,35 @@
+{
+    "compilerOptions": {
+        // Environment
+        "lib": ["ESNext", "DOM"],
+        "target": "ESNext",
+        "module": "Preserve",
+        "moduleDetection": "force",
+
+        // JSDoc mode — JS files with @type annotations, no emit
+        "allowJs": true,
+        "checkJs": true,
+        "strictNullChecks": true,
+        "noEmit": true,
+
+        // Module resolution (Bun native)
+        "moduleResolution": "bundler",
+        "verbatimModuleSyntax": true,
+
+        // Types
+        "types": ["bun"],
+
+        // Strict JSDoc checks
+        "strict": true,
+        "skipLibCheck": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+
+        // Relaxed diagnostics — developer DX
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "noPropertyAccessFromIndexSignature": false,
+    },
+    "include": ["src/**/*.js", "src/**/*.d.ts"]
+}

@@ -1,0 +1,3 @@
+[test]
+# Run this file before every test — bootstraps jsdom DOM globals
+preload = ["./tests/setup.js"]
