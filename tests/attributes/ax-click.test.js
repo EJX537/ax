@@ -3,6 +3,8 @@
  *
  * When an agent wants to trigger an action on the page, it reads ax-click elements.
  * The output is a skill(name, ...) call — the agent's entry point for invoking actions.
+ *
+ * Round-trip: client triggers the action in the DOM after agent decision.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -80,5 +82,65 @@ describe("ax-click — agent triggerable actions", () => {
     expect(result.type).toBe("skill");
     expect(result.name).toBe("summarize");
     expect(result.text).toBe("Click me");
+  });
+
+  describe("round-trip — client triggers click actions after agent decision", () => {
+    it("client clicks the button to trigger the action", () => {
+      document.body.innerHTML = `
+        <button ax-click="save">Save changes</button>
+      `;
+
+      let clicked = false;
+      document.querySelector("[ax-click]").addEventListener("click", () => {
+        clicked = true;
+      });
+
+      // Agent decides: "trigger save"
+      // Client acts: clicks the native button
+      document.querySelector("[ax-click]").click();
+
+      expect(clicked).toBe(true);
+    });
+
+    it("agent can locate the click element from the walk result", () => {
+      document.body.innerHTML = `
+        <button ax-click="summarize" id="summarize-btn">Summarize</button>
+      `;
+
+      // Agent reads available actions
+      const tree = ax.scan();
+      const action = tree.find((t) => t.name === "summarize");
+
+      // Client resolves the action to a DOM element and clicks it
+      const btn = document.querySelector('[ax-click="summarize"]');
+      let clicked = false;
+      btn.addEventListener("click", () => {
+        clicked = true;
+      });
+      btn.click();
+
+      expect(clicked).toBe(true);
+    });
+
+    it("client can verify the click action's text matches the button label", () => {
+      document.body.innerHTML = `
+        <button ax-click="export" id="export-btn">Export as CSV</button>
+      `;
+
+      const tree = ax.scan();
+      const action = tree.find((t) => t.name === "export");
+
+      // Client confirms the label matches before dispatching
+      const btn = document.querySelector('[ax-click="export"]');
+      expect(btn.textContent.trim()).toBe("Export as CSV");
+
+      let exported = false;
+      btn.addEventListener("click", () => {
+        exported = true;
+      });
+      btn.click();
+
+      expect(exported).toBe(true);
+    });
   });
 });

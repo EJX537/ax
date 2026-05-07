@@ -113,6 +113,51 @@ describe("ax-template — content transformation for agents", () => {
     expect(result.templates.length).toBeGreaterThan(0);
   });
 
+  it("non-primitive child with ax-template includes template in item result", () => {
+      document.body.innerHTML = `
+        <div ax-view="list">
+          <p ax-template="(e) => e.toUpperCase()">hello</p>
+        </div>
+      `;
+
+      const el = document.querySelector("[ax-view]");
+      const result = ax.walk(el);
+
+      const child = result.children[0];
+      expect(child.type).toBe("item");
+      expect(child.text).toBe("hello");
+      expect(child.template).toBe("(e) => e.toUpperCase()");
+    });
+
+    it("multiple non-primitive children with templates each carry their template", () => {
+      document.body.innerHTML = `
+        <ul ax-view="list">
+          <li ax-template="(e) => e.trim()">  first  </li>
+          <li ax-template="(e) => '>> ' + e">second</li>
+        </ul>
+      `;
+
+      const el = document.querySelector("[ax-view]");
+      const result = ax.walk(el);
+
+      expect(result.children[0].template).toBe("(e) => e.trim()");
+      expect(result.children[1].template).toBe("(e) => '>> ' + e");
+    });
+
+    it("child with ax-template but no primitive is still type item with template", () => {
+      document.body.innerHTML = `
+        <div ax-view="section">
+          <span ax-template="(e) => e.toUpperCase()">text</span>
+        </div>
+      `;
+
+      const result = ax.walk(document.querySelector("[ax-view]"));
+
+      expect(result.children[0].type).toBe("item");
+      expect(result.children[0].template).toBe("(e) => e.toUpperCase()");
+      expect(result.children[0].text).toBe("text");
+    });
+
   describe("harness evaluation — templates produce prompt-ready output", () => {
     /**
      * Simulates a client harness evaluating template lambdas.

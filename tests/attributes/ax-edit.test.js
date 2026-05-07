@@ -5,6 +5,8 @@
  * - Container ax-edit → skill(name, [field(...), field(...)])
  * - Standalone ax-edit → skill(name, element)
  * - The input type is inferred so the agent knows how to interact
+ *
+ * Round-trip: agent reads → decides → client writes → DOM updated
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,13 +32,11 @@ describe("ax-edit — agent writable fields", () => {
 
     const tree = ax.scan();
 
-    // Agent sees: skill("notes", [field("title", ...), field("body", ...)])
     const notesSkill = tree.find((t) => t.name === "notes");
     expect(notesSkill).toBeDefined();
     expect(notesSkill.type).toBe("skill");
     expect(notesSkill.children).toHaveLength(2);
 
-    // Agent sees individual fields
     const fields = notesSkill.children;
     expect(fields[0].type).toBe("field");
     expect(fields[0].name).toBe("title");
@@ -126,7 +126,6 @@ describe("ax-edit — agent writable fields", () => {
 
     const tree = ax.scan();
 
-    // A standalone ax-edit defaults to skill
     expect(tree).toHaveLength(1);
     expect(tree[0].type).toBe("skill");
     expect(tree[0].name).toBe("quick note");
@@ -143,7 +142,6 @@ describe("ax-edit — agent writable fields", () => {
 
     const tree = ax.scan();
 
-    // Agent sees both the form skill and the save action
     const saveAction = tree.find((t) => t.type === "skill" && t.name === "save");
     expect(saveAction).toBeDefined();
 
@@ -153,23 +151,135 @@ describe("ax-edit — agent writable fields", () => {
 
   describe("round-trip — client writes agent decisions back to the DOM", () => {
     /**
-     * Agent tool example: "fill title", "set body", "check active".
-     * The harness reads ax-edit output to locate the DOM element,
-     * then writes using the native DOM API.
+     * The agent decides to write a field. The harness:
+     * 1. Reads the ax-edit output to find the element and its location
+     * 2. Writes the value to the DOM via native API
+     * 3. The page reflects the new state
      */
-    function findEditElement(name) {
-      // The harness uses the scope name to find the element
-      const scope = ax.get(name);
-      if (scope) {
-        const el = scope.element;
-        // For named scopes that are form containers, the harness
-        // reads the walk children to find fields
-        const tree = ax.scan();
-        const skill = tree.find((s) => s.name === name);
-        if (skill) return { element: el, skill };
-        return { element: el };
-      }
-      // Fallback: search DOM for element with matching ax-edit value
-      return {
-        element: document.querySelector(
-          "[ax-edit=\\
+
+    it("client can set a text field value and DOM updates", () => {
+      document.body.innerHTML = `
+        <form ax-edit="notes">
+          <input ax-edit="title" type="text" />
+          <textarea ax-edit="body">old body</textarea>
+        </form>
+      `;
+
+      // Agent reads the form structure
+      const tree = ax.scan();
+      const formSkill = tree.find((s) => s.name === "notes");
+      const titleField = formSkill.children.find((c) => c.name === "title");
+
+      // Agent decides: "set title to 'Meeting notes'"
+      // Client acts: finds the element and writes
+      const titleInput = document.querySelector(
+        '[ax-edit="title"]',
+      );
+      titleInput.value = "Meeting notes";
+
+      // Agent re-reads to verify
+      const updated = ax.scan();
+      const updatedTitle = updated
+        .find((s) => s.name === "notes")
+        .children.find((c) => c.name === "title");
+
+      expect(updatedTitle.value).toBe("Meeting notes");
+    });
+
+    it("client can check a checkbox and DOM reflects the change", () => {
+      document.body.innerHTML = `
+        <form ax-edit="prefs">
+          <input ax-edit="newsletter" type="checkbox" />
+        </form>
+      `;
+
+      // Agent reads current state
+      const before = ax.scan();
+      const fieldBefore = before[0].children.find(
+        (c) => c.name === "newsletter",
+      );
+      expect(fieldBefore.value).toBe(false);
+
+      // Agent decides: "enable newsletter"
+      // Client acts: checks the checkbox
+      const checkbox = document.querySelector(
+        '[ax-edit="newsletter"]',
+      );
+      checkbox.checked = true;
+
+      // Agent re-reads to verify
+      const after = ax.scan();
+      const fieldAfter = after[0].children.find(
+        (c) => c.name === "newsletter",
+      );
+      expect(fieldAfter.value).toBe(true);
+    });
+
+    it("client can change a select value and DOM updates", () => {
+      document.body.innerHTML = `
+        <form ax-edit="settings">
+          <select ax-edit="theme">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </form>
+      `;
+
+      // Agent decides: "set theme to dark"
+      const select = document.querySelector(
+        '[ax-edit="theme"]',
+      );
+      select.value = "dark";
+
+      // Agent re-reads to verify
+      const tree = ax.scan();
+      const themeField = tree[0].children.find(
+        (c) => c.name === "theme",
+      );
+
+      expect(themeField.value).toBe("dark");
+    });
+
+    it("client can fill multiple fields in a form sequentially", () => {
+      document.body.innerHTML = `
+        <form ax-edit="profile">
+          <input ax-edit="name" type="text" />
+          <input ax-edit="age" type="number" />
+        </form>
+      `;
+
+      // Agent decides two writes in sequence
+      document.querySelector('[ax-edit="name"]').value = "Bob";
+      document.querySelector('[ax-edit="age"]').value = "28";
+
+      // Agent re-reads
+      const tree = ax.scan();
+      const children = tree[0].children;
+
+      expect(children.find((c) => c.name === "name").value).toBe(
+        "Bob",
+      );
+      expect(children.find((c) => c.name === "age").value).toBe(
+        "28",
+      );
+    });
+
+    it("client can clear a textarea and DOM reflects empty value", () => {
+      document.body.innerHTML = `
+        <form ax-edit="notes">
+          <textarea ax-edit="body">Existing content</textarea>
+        </form>
+      `;
+
+      // Agent decides: "clear the body"
+      document.querySelector('[ax-edit="body"]').value = "";
+
+      const tree = ax.scan();
+      const bodyField = tree[0].children.find(
+        (c) => c.name === "body",
+      );
+
+      expect(bodyField.value).toBe("");
+    });
+  });
+});

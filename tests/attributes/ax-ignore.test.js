@@ -98,4 +98,41 @@ describe("ax-ignore — agent content exclusion", () => {
 
     expect(() => ax.scan()).not.toThrow();
   });
+
+  it("ignored elements do not expose hooks or status", () => {
+    document.body.innerHTML = `
+      <div ax-view="page">
+        <button ax-click="hidden"
+                ax-ignore
+                ax-beforeClick="shouldNotAppear()"
+                disabled>Hidden</button>
+      </div>
+    `;
+
+    const tree = ax.scan();
+    const hiddenAction = tree.find((t) => t.name === "hidden");
+
+    // The ignored element should not appear at all
+    expect(hiddenAction).toBeUndefined();
+  });
+
+  it("ignored container with nested hooks/status is fully excluded", () => {
+    document.body.innerHTML = `
+      <div ax-view="page">
+        <div ax-ignore>
+          <button ax-click="deep"
+                  ax-beforeClick="nope()"
+                  aria-busy="true">Deep</button>
+          <input ax-edit="field" type="text" disabled />
+        </div>
+      </div>
+    `;
+
+    const tree = ax.scan();
+    const names = tree.map((t) => t.name);
+
+    // Nothing from inside ax-ignore should appear
+    expect(names).not.toContain("deep");
+    expect(names).not.toContain("field");
+  });
 });

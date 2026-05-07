@@ -91,6 +91,26 @@ Produces:
 view("todo list", [item(li0), item(li1)])
 ```
 
+---
+
+### `ax-onView`, `ax-beforeView`, `ax-afterView`
+
+Declares client hooks for an `ax-view` primitive. These attributes **do not** name the primitive and **do not** execute in `ax.js` — they are raw strings the client evaluates.
+
+Rules:
+- Must be used on the same element as `ax-view`
+- Raw string lambda or function reference; `ax.js` never evaluates it
+- Hook phases: `before` → `on` → `after`
+
+```html
+<section
+  ax-view="article"
+  ax-beforeView="(e) => e.status === 'ready'"
+  ax-onView="(e) => e.status === 'success'"
+  ax-afterView="(e) => console.log(e)"
+></section>
+```
+
 A nested `ax-view` creates a new scope:
 
 ```html
@@ -131,6 +151,26 @@ skill("summarize", transform(e => e.trim(20), element))
 
 ---
 
+### `ax-onClick`, `ax-beforeClick`, `ax-afterClick`
+
+Declares client hooks for an `ax-click` primitive. These attributes **do not** name the primitive and **do not** execute in `ax.js` — they are raw strings the client evaluates.
+
+Rules:
+- Must be used on the same element as `ax-click`
+- Raw string lambda or function reference; `ax.js` never evaluates it
+- Hook phases: `before` → `on` → `after`
+
+```html
+<button
+  ax-click="submit"
+  ax-beforeClick="(e) => e.status === 'ready'"
+  ax-onClick="(e) => e.status === 'success'"
+  ax-afterClick="(e) => console.log(e)"
+>Submit</button>
+```
+
+---
+
 ### `ax-edit`
 
 Marks an element as writable by the agent. Constructs a skill call. Input type is inferred from the native HTML element and `type` attribute — `ax.js` does not need to be told. Applies to `input`, `textarea`, `select`, radio groups, checkboxes, and file uploads.
@@ -161,6 +201,12 @@ skill("notes", [
 ])
 ```
 
+---
+
+### `ax-onEdit`, `ax-beforeEdit`, `ax-afterEdit`
+
+Declares client hooks for an `ax-edit` primitive. Same rules as click hooks; raw string only, evaluated by the client. Must be on the same element as `ax-edit`.
+
 A standalone `ax-edit` outside any parent `ax-edit` always defaults to `skill`:
 
 ```html
@@ -186,6 +232,12 @@ Carries an optional `ax-swap` hint describing the expected context change. A hin
 ```
 
 Suggested `ax-swap` values: `page`, `region`, `modal`. The client may define additional values.
+
+---
+
+### `ax-onNav`, `ax-beforeNav`, `ax-afterNav`
+
+Declares client hooks for an `ax-nav` primitive. Same rules as click hooks; raw string only, evaluated by the client. Must be on the same element as `ax-nav`.
 
 ---
 

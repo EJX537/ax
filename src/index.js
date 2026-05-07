@@ -95,6 +95,56 @@ function readPrimitives(el) {
 }
 
 /**
+ * @param {Element} el
+ * @param {string} primitive
+ * @returns {{ before?: string, on?: string, after?: string }}
+ */
+function readHooks(el, primitive) {
+    const suffix = primitive.replace("ax-", "");
+    const cap = suffix.charAt(0).toUpperCase() + suffix.slice(1);
+    const before = getAttr(el, `ax-before${cap}`);
+    const on = getAttr(el, `ax-on${cap}`);
+    const after = getAttr(el, `ax-after${cap}`);
+    return {
+        before: before !== null ? before : undefined,
+        on: on !== null ? on : undefined,
+        after: after !== null ? after : undefined,
+    };
+}
+
+/**
+ * @param {Element} el
+ * @returns {{ status?: string, reason?: string }}
+ */
+function readStatus(el) {
+    const disabled =
+        "disabled" in el
+            ? /** @type {HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement} */ (
+                  el
+              ).disabled
+            : el.hasAttribute("disabled");
+
+    if (disabled) return { status: "disabled" };
+
+    const ariaDisabled = el.getAttribute("aria-disabled");
+    if (ariaDisabled === "true") return { status: "disabled" };
+
+    const busy = el.getAttribute("aria-busy");
+    if (busy === "true") return { status: "loading" };
+
+    if ("checkValidity" in el && typeof el.checkValidity === "function") {
+        try {
+            const valid = /** @type {HTMLInputElement} */ (el).checkValidity();
+            if (!valid) return { status: "blocked", reason: "invalid" };
+        } catch {
+            // ignore validation failures in non-form contexts
+        }
+    }
+
+    return {};
+}
+
+/**
  * @param {{ primitive?: string, name?: string }[]} list
  */
 function assertPrimitiveValues(list) {
@@ -216,12 +266,39 @@ function resolveAttr(el, dataKey, attrName) {
     return val !== null ? val : undefined;
 }
 
-function walk(el) {
+/**
+ * @param {Element} el
+ * @returns {any[]}
+ */
+function walkAll(el) {
+    const data = /** @type {any} */ (el)["__ax__internal"] || {};
+    const primitiveEntries = [];
+    if (data.view) primitiveEntries.push({ primitive: "ax-view", name: data.view.name });
+    if (data.edit) primitiveEntries.push({ primitive: "ax-edit", name: data.edit.name });
+    if (data.click) primitiveEntries.push({ primitive: "ax-click", name: data.click.name });
+    if (data.nav) primitiveEntries.push({ primitive: "ax-nav", name: data.nav.name });
+
+    if (primitiveEntries.length === 0) {
+        return [walk(el)].filter(Boolean);
+    }
+
+    return primitiveEntries
+        .map((entry) => walk(el, entry.primitive, entry.name))
+        .filter(Boolean);
+}
+
+/**
+ * @param {Element} el
+ * @param {string | undefined} forcedPrimitive
+ * @param {string | undefined} forcedName
+ * @returns {any | undefined}
+ */
+function walk(el, forcedPrimitive, forcedName) {
     if (isIgnored(el)) return undefined;
 
     const data = /** @type {any} */ (el)["__ax__internal"] || {};
-    const primitive = primaryPrimitive(el);
-    const name = primitiveName(el);
+    const primitive = forcedPrimitive || primaryPrimitive(el);
+    const name = forcedName || primitiveName(el);
 
     // Resolve template from internal data or directly from attribute
     const template = resolveAttr(el, "template", "ax-template");
@@ -247,6 +324,8 @@ function walk(el) {
             children,
             template: template,
             templates: templatesList.length ? templatesList : undefined,
+            hooks: forcedPrimitive ? data.view?.hooks : data.hooks,
+            status: forcedPrimitive ? data.view?.status : data.status,
         };
         return result;
     }
@@ -289,6 +368,8 @@ function walk(el) {
             name,
             children: fields,
             template: template,
+            hooks: forcedPrimitive ? data.edit?.hooks : data.hooks,
+            status: forcedPrimitive ? data.edit?.status : data.status,
         };
     }
 
@@ -300,6 +381,8 @@ function walk(el) {
             text: (el.textContent || "").trim(),
             children,
             template: template,
+            hooks: forcedPrimitive ? data.click?.hooks : data.hooks,
+            status: forcedPrimitive ? data.click?.status : data.status,
         };
     }
 
@@ -311,6 +394,8 @@ function walk(el) {
             href: el.getAttribute("href") || undefined,
             swap: swap,
             template: template,
+            hooks: forcedPrimitive ? data.nav?.hooks : data.hooks,
+            status: forcedPrimitive ? data.nav?.status : data.status,
         };
     }
 
@@ -328,7 +413,7 @@ function process(root) {
 
     /**
      * @param {Element} el
-     * @param {{ scope?: string, viewName?: string, editName?: string }} ctx
+     * @param {{ scope?: string, viewName?: string, editName?: string, siblingScopes?: Set<string> }} ctx
      */
     function visit(el, ctx) {
         if (isIgnored(el)) return;
@@ -352,6 +437,13 @@ function process(root) {
                 ? contentScope
                 : viewName || ctx.scope
             : ctx.scope;
+
+        if (activeScope && definesScope && ctx.siblingScopes) {
+            if (ctx.siblingScopes.has(activeScope)) {
+                throw new Error(`Duplicate scope name at same level: ${activeScope}`);
+            }
+            ctx.siblingScopes.add(activeScope);
+        }
 
         const hasExplicit =
             primitivesFound.length > 0 ||
@@ -386,18 +478,37 @@ function process(root) {
             )?.name;
             data.primitive = prim;
             data.name = name;
+            data.hooks = readHooks(el, prim);
+            data.status = readStatus(el);
         }
 
         if (data && primitiveNames.length > 1) {
             for (const prim of primitivesFound) {
                 if (!prim.primitive) continue;
                 if (prim.primitive === "ax-view")
-                    data.view = { name: prim.name };
+                    data.view = {
+                        name: prim.name,
+                        hooks: readHooks(el, "ax-view"),
+                        status: readStatus(el),
+                    };
                 if (prim.primitive === "ax-edit")
-                    data.edit = { name: prim.name };
+                    data.edit = {
+                        name: prim.name,
+                        hooks: readHooks(el, "ax-edit"),
+                        status: readStatus(el),
+                    };
                 if (prim.primitive === "ax-click")
-                    data.click = { name: prim.name };
-                if (prim.primitive === "ax-nav") data.nav = { name: prim.name };
+                    data.click = {
+                        name: prim.name,
+                        hooks: readHooks(el, "ax-click"),
+                        status: readStatus(el),
+                    };
+                if (prim.primitive === "ax-nav")
+                    data.nav = {
+                        name: prim.name,
+                        hooks: readHooks(el, "ax-nav"),
+                        status: readStatus(el),
+                    };
             }
         }
 
@@ -433,6 +544,7 @@ function process(root) {
             scope: activeScope,
             viewName: viewName || ctx.viewName,
             editName: editName || ctx.editName,
+            siblingScopes: new Set(),
         };
 
         for (const child of Array.from(el.children)) {
@@ -444,6 +556,7 @@ function process(root) {
         scope: undefined,
         viewName: undefined,
         editName: undefined,
+        siblingScopes: new Set(),
     });
 }
 
@@ -461,7 +574,7 @@ function scan() {
             "[ax-view], [data-ax-view], [ax-edit], [data-ax-edit], [ax-click], [data-ax-click], [ax-nav], [data-ax-nav]",
         ),
     );
-    return roots.map((el) => walk(el)).filter(Boolean);
+    return roots.flatMap((el) => walkAll(el)).filter(Boolean);
 }
 
 /**

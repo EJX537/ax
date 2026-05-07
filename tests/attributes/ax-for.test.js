@@ -4,6 +4,9 @@
  * ax-for routes a template to a named primitive. The agent sees the
  * template applied to the target primitive, not the nearest parent.
  * This allows the agent to receive content routed to the correct handler.
+ *
+ * Invalid ax-for targets are silently ignored (the template group
+ * is not included in any output).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,8 +33,6 @@ describe("ax-for — route content to a named primitive", () => {
     const el = document.querySelector("[ax-content]");
     const result = ax.walk(el);
 
-    // The ax-for'd content routes to "edit todos", not "view todos"
-    // Agent sees edit todos as a separate skill call
     expect(result.type).toBe("view");
     expect(result.name).toBe("view todos");
   });
@@ -65,5 +66,34 @@ describe("ax-for — route content to a named primitive", () => {
     const displayView = tree.find((t) => t.name === "display");
 
     expect(displayView).toBeDefined();
+  });
+
+  it("invalid ax-for target name is silently ignored", () => {
+    document.body.innerHTML = `
+      <div ax-content="scope" ax-view="main">
+        <div ax-template="item" ax-for="nonexistent">
+          Orphaned content
+        </div>
+        <p>Visible item</p>
+      </div>
+    `;
+
+    const el = document.querySelector("[ax-content]");
+    const result = ax.walk(el);
+
+    // The orphaned group should not appear — only "Visible item" is a child
+    expect(result.children).toHaveLength(1);
+    expect(result.children[0].text).toBe("Visible item");
+  });
+
+  it("invalid ax-for on a skill element does not throw", () => {
+    document.body.innerHTML = `
+      <div ax-content="scope" ax-view="main">
+        <button ax-click="save" ax-for="nowhere">Save</button>
+      </div>
+    `;
+
+    // Should not throw — invalid ax-for is ignored
+    expect(() => ax.scan()).not.toThrow();
   });
 });

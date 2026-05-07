@@ -4,6 +4,8 @@
  * ax-nav tells an agent about navigation targets.
  * - Distinguished from ax-click — signals that following this changes the agent's context
  * - Carries href and optional ax-swap hint so the agent knows what kind of context change to expect
+ *
+ * Round-trip: client navigates after agent decision.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -95,5 +97,42 @@ describe("ax-nav — agent navigation targets", () => {
     const names = tree.map((t) => t.name);
 
     expect(names).toEqual(["home", "about", "contact"]);
+  });
+
+  describe("round-trip — client navigates after agent decision", () => {
+    it("client reads href from ax-nav to know where to navigate", () => {
+      document.body.innerHTML = `
+        <a ax-nav="next page" href="/page/2">Next</a>
+      `;
+
+      const tree = ax.scan();
+      const nav = tree.find((t) => t.name === "next page");
+
+      // Agent sees the href and decides to follow it
+      expect(nav.href).toBe("/page/2");
+    });
+
+    it("client uses ax-swap to decide HOW to handle the navigation result", () => {
+      document.body.innerHTML = `
+        <a ax-nav="load more" ax-swap="region" href="/items?page=2">More</a>
+      `;
+
+      const tree = ax.scan();
+      const nav = tree.find((t) => t.name === "load more");
+
+      // swap="region" tells the client to replace a region, not the full page
+      expect(nav.swap).toBe("region");
+      expect(nav.href).toBe("/items?page=2");
+    });
+
+    it("client navigates by following the anchor's native behavior", () => {
+      document.body.innerHTML = `
+        <a ax-nav="home" ax-swap="page" href="/" id="home-link">Home</a>
+      `;
+
+      // Client can read the href to navigate programmatically
+      const href = document.querySelector("#home-link").getAttribute("href");
+      expect(href).toBe("/");
+    });
   });
 });
