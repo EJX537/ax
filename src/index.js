@@ -51,7 +51,7 @@ function hasAttr(el, name) {
 function isIgnored(el) {
     if (!el || !(el instanceof Element)) return false;
     // Check the element and all ancestors for ax-ignore
-    var current = /** @type {Element | null} */ (el);
+    let current = /** @type {Element | null} */ (el);
     while (current) {
         if (hasAttr(current, "ax-ignore")) return true;
         current = current.parentElement;
@@ -213,7 +213,7 @@ function collectChildren(el, parentPrimitive) {
         const childPrimitive = primaryPrimitive(child);
         if (childPrimitive) {
             if (acceptsFor(child, parentPrimitive, parentName)) {
-                const childResult = walk(child);
+                const childResult = walk(child, undefined, undefined);
                 if (childResult) results.push(childResult);
             }
             continue;
@@ -223,7 +223,7 @@ function collectChildren(el, parentPrimitive) {
             continue;
         }
 
-        const childResult = walk(child);
+        const childResult = walk(child, undefined, undefined);
         if (childResult) results.push(childResult);
     }
 
@@ -273,13 +273,17 @@ function resolveAttr(el, dataKey, attrName) {
 function walkAll(el) {
     const data = /** @type {any} */ (el)["__ax__internal"] || {};
     const primitiveEntries = [];
-    if (data.view) primitiveEntries.push({ primitive: "ax-view", name: data.view.name });
-    if (data.edit) primitiveEntries.push({ primitive: "ax-edit", name: data.edit.name });
-    if (data.click) primitiveEntries.push({ primitive: "ax-click", name: data.click.name });
-    if (data.nav) primitiveEntries.push({ primitive: "ax-nav", name: data.nav.name });
+    if (data.view)
+        primitiveEntries.push({ primitive: "ax-view", name: data.view.name });
+    if (data.edit)
+        primitiveEntries.push({ primitive: "ax-edit", name: data.edit.name });
+    if (data.click)
+        primitiveEntries.push({ primitive: "ax-click", name: data.click.name });
+    if (data.nav)
+        primitiveEntries.push({ primitive: "ax-nav", name: data.nav.name });
 
     if (primitiveEntries.length === 0) {
-        return [walk(el)].filter(Boolean);
+        return [walk(el, undefined, undefined)].filter(Boolean);
     }
 
     return primitiveEntries
@@ -298,7 +302,7 @@ function walk(el, forcedPrimitive, forcedName) {
 
     const data = /** @type {any} */ (el)["__ax__internal"] || {};
     const primitive = forcedPrimitive || primaryPrimitive(el);
-    const name = forcedName || primitiveName(el);
+    const name = forcedName || primitiveName(el) || "";
 
     // Resolve template from internal data or directly from attribute
     const template = resolveAttr(el, "template", "ax-template");
@@ -339,10 +343,14 @@ function walk(el, forcedPrimitive, forcedName) {
             if (isIgnored(child)) continue;
             const childData = /** @type {any} */ (child)["__ax__internal"];
             // Child must be a field (not another skill-level ax-edit)
-            const childTemplate = childData?.template || resolveAttr(child, "template", "ax-template");
-            if (childData && childTemplate && childTemplate !== "field") continue;
+            const childTemplate =
+                childData?.template ||
+                resolveAttr(child, "template", "ax-template");
+            if (childData && childTemplate && childTemplate !== "field")
+                continue;
             if (!acceptsFor(child, primitive, name)) continue;
-            const fieldName = childData?.name || getAttr(child, "ax-edit") || "";
+            const fieldName =
+                childData?.name || getAttr(child, "ax-edit") || "";
             const inputType = childData?.inputType || inferInputType(child);
             let value;
             if (inputType === "checkbox" || inputType === "radio") {
@@ -440,7 +448,9 @@ function process(root) {
 
         if (activeScope && definesScope && ctx.siblingScopes) {
             if (ctx.siblingScopes.has(activeScope)) {
-                throw new Error(`Duplicate scope name at same level: ${activeScope}`);
+                throw new Error(
+                    `Duplicate scope name at same level: ${activeScope}`,
+                );
             }
             ctx.siblingScopes.add(activeScope);
         }
@@ -472,7 +482,7 @@ function process(root) {
             .filter(Boolean);
 
         if (data && primitiveNames.length === 1) {
-            const prim = primitiveNames[0];
+            const prim = primitiveNames[0] || "";
             const name = primitivesFound.find(
                 (p) => p.primitive === prim,
             )?.name;
