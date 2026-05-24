@@ -1,0 +1,279 @@
+{
+    "dag": {
+        "$root": ["$form-error", "$personal-info", "$success-message"],
+        "$form-error": [],
+        "$success-message": [],
+        "$personal-info": [
+            "$confirm-password",
+            "$country",
+            "$email",
+            "$form-title",
+            "$legal-notice",
+            "$marketing-consent",
+            "$name-section",
+            "$password",
+            "$phone",
+            "$submit-registration"
+        ],
+        "$form-title": [],
+        "$name-section": ["$first-name", "$last-name", "$middle-name"],
+        "$first-name": [],
+        "$middle-name": [],
+        "$last-name": [],
+        "$email": [],
+        "$phone": [],
+        "$country": [],
+        "$marketing-consent": [],
+        "$password": [],
+        "$confirm-password": [],
+        "$submit-registration": [],
+        "$legal-notice": []
+    },
+    "nodes": [
+        {
+            "id": "$root",
+            "parent": null,
+            "children": ["$form-error", "$personal-info", "$success-message"],
+            "fn": []
+        },
+        {
+            "id": "$form-error",
+            "parent": "$root",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "form error"
+                }
+            ]
+        },
+        {
+            "id": "$success-message",
+            "parent": "$root",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "success message"
+                }
+            ]
+        },
+        {
+            "id": "$personal-info",
+            "parent": "$root",
+            "children": [
+                "$confirm-password",
+                "$country",
+                "$email",
+                "$form-title",
+                "$legal-notice",
+                "$marketing-consent",
+                "$name-section",
+                "$password",
+                "$phone",
+                "$submit-registration"
+            ],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "personal info",
+                    "args": {
+                        "first name": "text",
+                        "middle name": "text?",
+                        "last name": "text",
+                        "email": "email",
+                        "phone": "tel?",
+                        "country": "select",
+                        "marketing consent": "checkbox?",
+                        "password": "password",
+                        "confirm password": "password"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$form-title",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "form title"
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$name-section",
+            "parent": "$personal-info",
+            "children": ["$first-name", "$last-name", "$middle-name"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "name section"
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$first-name",
+            "parent": "$name-section",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "first name",
+                    "args": {
+                        "first name": "text"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$middle-name",
+            "parent": "$name-section",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "middle name",
+                    "args": {
+                        "middle name": "text?"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$last-name",
+            "parent": "$name-section",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "last name",
+                    "args": {
+                        "last name": "text"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$email",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "email",
+                    "args": {
+                        "email": "email"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$phone",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "phone",
+                    "args": {
+                        "phone": "tel?"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$country",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "country",
+                    "args": {
+                        "country": "select"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$marketing-consent",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "marketing consent",
+                    "args": {
+                        "marketing consent": "checkbox?"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$password",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "password",
+                    "args": {
+                        "password": "password"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$confirm-password",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "confirm password",
+                    "args": {
+                        "confirm password": "password"
+                    }
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$submit-registration",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "click",
+                    "name": "submit registration"
+                }
+            ],
+            "scope": "signup"
+        },
+        {
+            "id": "$legal-notice",
+            "parent": "$personal-info",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "legal notice"
+                }
+            ],
+            "scope": "signup"
+        }
+    ]
+}

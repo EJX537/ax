@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Dashboard</title>
+        <script src="../../dist/ax.js"></script>
+    </head>
+    <body>
+        <!--
+    User flow: monitor metrics, filter date range, inspect orders, export
+    Annotations demonstrate: view, click, nav, edit, ax-ctx, ax-ignore, hooks
+    -->
+
+        <div ax-ctx="dashboard">
+            <header ax-view="dashboard header">
+                <h1>Dashboard</h1>
+                <p ax-view="last updated">Last updated: 2 minutes ago</p>
+                <button
+                    ax-click="refresh all"
+                    ax-on-click="(ctx) => fetchLatestData()"
+                >
+                    ↻ Refresh
+                </button>
+            </header>
+
+            <!-- Key metrics row -->
+            <section ax-view="metrics row">
+                <div ax-ctx="metric:revenue" ax-view="metric card">
+                    <h4>Revenue</h4>
+                    <p
+                        ax-view="metric value"
+                        ax-on-view="(ctx) => formatCurrency(ctx.args.value)"
+                    >
+                        $48,290
+                    </p>
+                    <span ax-view="metric trend">↑ 12.3%</span>
+                </div>
+
+                <div ax-ctx="metric:users" ax-view="metric card">
+                    <h4>Active Users</h4>
+                    <p ax-view="metric value">2,847</p>
+                    <span ax-view="metric trend">↑ 5.1%</span>
+                </div>
+
+                <div ax-ctx="metric:orders" ax-view="metric card">
+                    <h4>Orders</h4>
+                    <p ax-view="metric value">341</p>
+                    <span ax-view="metric trend">↓ 2.4%</span>
+                </div>
+
+                <div ax-ctx="metric:bounce" ax-view="metric card">
+                    <h4>Bounce Rate</h4>
+                    <p ax-view="metric value">24.7%</p>
+                    <span
+                        ax-view="metric trend"
+                        ax-before-view="(ctx) => normalizeTrend(ctx)"
+                        >— 0.3%</span
+                    >
+                </div>
+            </section>
+
+            <!-- Date range filter -->
+            <section ax-ctx="date filter">
+                <h3>Filter by date</h3>
+                <label>From <input ax-edit="date from" type="date" /></label>
+                <label>To <input ax-edit="date to" type="date" /></label>
+                <button
+                    ax-click="apply date filter"
+                    ax-on-click="(ctx) => applyDateFilter(ctx.args)"
+                >
+                    Apply
+                </button>
+            </section>
+
+            <!-- Data table -->
+            <section ax-view="data table section">
+                <h3>Recent Orders</h3>
+                <table ax-ctx="recent orders" ax-view="order table">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Total</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr ax-ctx="order:10234" ax-view="order row">
+                            <td>#10234</td>
+                            <td>Alice Chen</td>
+                            <td><span ax-edit="order status">Shipped</span></td>
+                            <td>$129.00</td>
+                            <td>
+                                <a
+                                    ax-nav="view order"
+                                    href="/orders/10234"
+                                    ax-swap="page"
+                                    >View</a
+                                >
+                            </td>
+                        </tr>
+                        <tr ax-ctx="order:10235" ax-view="order row">
+                            <td>#10235</td>
+                            <td>Bob Nakamura</td>
+                            <td>
+                                <span ax-edit="order status">Processing</span>
+                            </td>
+                            <td>$89.50</td>
+                            <td>
+                                <a
+                                    ax-nav="view order"
+                                    href="/orders/10235"
+                                    ax-swap="page"
+                                    >View</a
+                                >
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <button
+                    ax-click="export to CSV"
+                    ax-on-click="(ctx) => exportCSV()"
+                >
+                    Export CSV
+                </button>
+                <button
+                    ax-click="export to PDF"
+                    ax-before-click="(ctx) => checkQuota()"
+                    disabled
+                >
+                    Export PDF
+                </button>
+            </section>
+
+            <!-- Toast notification (excluded from agent) -->
+            <div ax-ignore class="toast-container">
+                <div class="toast">Data refreshed successfully</div>
+            </div>
+        </div>
+    </body>
+</html>

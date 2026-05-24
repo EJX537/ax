@@ -7,6 +7,7 @@
     "build:js": "mkdir -p dist && bun build src/index.js --outfile dist/ax.js --target browser",
     "build:min": "bun build src/index.js --outfile dist/ax.min.js --target browser --minify",
     "build": "rm -rf dist && bun run build:js && bun run build:min",
+    "generate": "bun scripts/generate-golden.mjs --all",
     "dev": "bun run --watch src/index.js",
     "start": "bun run src/index.js",
     "test": "bun test",

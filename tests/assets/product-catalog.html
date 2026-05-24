@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Product Catalog</title>
+        <script src="../../dist/ax.js"></script>
+    </head>
+    <body>
+        <!--
+    User flow: browse products, filter, view details, paginate
+    Annotations demonstrate: nested views, ax-ctx per product, nav for pagination, click add-to-cart
+    -->
+
+        <div ax-ctx="catalog">
+            <header ax-view="catalog header">
+                <h1>Shop</h1>
+                <input
+                    ax-edit="search query"
+                    type="search"
+                    placeholder="Search products…"
+                />
+                <button
+                    ax-click="search"
+                    ax-on-click="(ctx) => searchProducts(ctx.el.value)"
+                >
+                    Search
+                </button>
+            </header>
+
+            <!-- Filter sidebar -->
+            <aside ax-ctx="filters" ax-view="filter panel">
+                <h3>Category</h3>
+                <label
+                    ><input
+                        ax-edit="category filter"
+                        type="checkbox"
+                        value="electronics"
+                    />
+                    Electronics</label
+                >
+                <label
+                    ><input
+                        ax-edit="category filter"
+                        type="checkbox"
+                        value="clothing"
+                    />
+                    Clothing</label
+                >
+                <label
+                    ><input
+                        ax-edit="category filter"
+                        type="checkbox"
+                        value="books"
+                    />
+                    Books</label
+                >
+
+                <h3>Price range</h3>
+                <select ax-edit="price range">
+                    <option value="">Any</option>
+                    <option value="0-25">Under $25</option>
+                    <option value="25-100">$25 – $100</option>
+                    <option value="100+">Over $100</option>
+                </select>
+            </aside>
+
+            <!-- Product grid -->
+            <div ax-view="product grid">
+                <article ax-ctx="product:wireless-mouse" ax-view="product card">
+                    <h3 ax-view="product name">Wireless Mouse</h3>
+                    <p ax-view="product price">$29.99</p>
+                    <button
+                        ax-click="add to cart"
+                        ax-on-click="(ctx) => addToCart('wireless-mouse')"
+                    >
+                        Add to cart
+                    </button>
+                    <a
+                        ax-nav="product detail"
+                        ax-swap="page"
+                        href="/product/wireless-mouse"
+                        >Details</a
+                    >
+                </article>
+
+                <article
+                    ax-ctx="product:canvas-backpack"
+                    ax-view="product card"
+                >
+                    <h3 ax-view="product name">Canvas Backpack</h3>
+                    <p ax-view="product price">$89.00</p>
+                    <button
+                        ax-click="add to cart"
+                        ax-on-click="(ctx) => addToCart('canvas-backpack')"
+                    >
+                        Add to cart
+                    </button>
+                    <a
+                        ax-nav="product detail"
+                        ax-swap="page"
+                        href="/product/canvas-backpack"
+                        >Details</a
+                    >
+                </article>
+
+                <article
+                    ax-ctx="product:javascript-guide"
+                    ax-view="product card"
+                >
+                    <h3 ax-view="product name">JavaScript: The Good Parts</h3>
+                    <p ax-view="product price">$24.95</p>
+                    <button
+                        ax-click="add to cart"
+                        ax-on-click="(ctx) => addToCart('javascript-guide')"
+                    >
+                        Add to cart
+                    </button>
+                    <a
+                        ax-nav="product detail"
+                        ax-swap="page"
+                        href="/product/javascript-guide"
+                        >Details</a
+                    >
+                </article>
+            </div>
+
+            <!-- Pagination -->
+            <nav ax-ctx="pagination">
+                <a ax-nav="previous page" ax-swap="region" href="/shop?page=1"
+                    >← Previous</a
+                >
+                <span ax-view="page indicator">Page 2 of 5</span>
+                <a ax-nav="next page" ax-swap="region" href="/shop?page=3"
+                    >Next →</a
+                >
+            </nav>
+        </div>
+    </body>
+</html>

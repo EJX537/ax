@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Search Results</title>
+        <script src="../../dist/ax.js"></script>
+    </head>
+    <body>
+        <!--
+    User flow: enter query, refine results, paginate
+    Annotations demonstrate: edit, view, nav, hooks, click, radio groups
+    -->
+
+        <div ax-ctx="search">
+            <header ax-view="search header">
+                <form ax-edit="search form">
+                    <input
+                        ax-edit="query"
+                        type="search"
+                        value="wireless headphones"
+                    />
+                    <button
+                        ax-click="run search"
+                        ax-on-click="(ctx) => submitSearch(ctx.el.form)"
+                    >
+                        Search
+                    </button>
+                </form>
+                <p ax-view="result summary">About 142 results (0.3 seconds)</p>
+            </header>
+
+            <!-- Refinement controls -->
+            <aside ax-ctx="refinements" ax-view="refinement panel">
+                <h4>Sort by</h4>
+                <select ax-edit="sort">
+                    <option value="relevance">Relevance</option>
+                    <option value="price-asc">Price: Low to high</option>
+                    <option value="price-desc">Price: High to low</option>
+                    <option value="rating">Rating</option>
+                </select>
+
+                <h4>Rating</h4>
+                <label
+                    ><input
+                        ax-edit="rating filter"
+                        type="radio"
+                        name="rating"
+                        value="4"
+                    />
+                    4★ & up</label
+                >
+                <label
+                    ><input
+                        ax-edit="rating filter"
+                        type="radio"
+                        name="rating"
+                        value="3"
+                    />
+                    3★ & up</label
+                >
+                <label
+                    ><input
+                        ax-edit="rating filter"
+                        type="radio"
+                        name="rating"
+                        value="any"
+                        checked
+                    />
+                    Any</label
+                >
+            </aside>
+
+            <!-- Result list -->
+            <div ax-view="results">
+                <article ax-ctx="result:sony-wh1000xm5" ax-view="result item">
+                    <h3>
+                        <a
+                            ax-nav="view result"
+                            href="/product/sony-wh1000xm5"
+                            ax-swap="page"
+                        >
+                            Sony WH-1000XM5 Wireless Noise Cancelling Headphones
+                        </a>
+                    </h3>
+                    <p ax-view="price">$349.99</p>
+                    <p ax-view="rating">★★★★☆ (2,341 reviews)</p>
+                    <button ax-click="add to compare">Compare</button>
+                </article>
+
+                <article ax-ctx="result:bose-qc45" ax-view="result item">
+                    <h3>
+                        <a
+                            ax-nav="view result"
+                            href="/product/bose-qc45"
+                            ax-swap="page"
+                        >
+                            Bose QuietComfort 45 Wireless Headphones
+                        </a>
+                    </h3>
+                    <p ax-view="price">$329.00</p>
+                    <p ax-view="rating">★★★★☆ (1,892 reviews)</p>
+                    <button ax-click="add to compare">Compare</button>
+                </article>
+
+                <article ax-ctx="result:airpods-pro" ax-view="result item">
+                    <h3>
+                        <a
+                            ax-nav="view result"
+                            href="/product/airpods-pro"
+                            ax-swap="page"
+                        >
+                            Apple AirPods Pro (2nd generation)
+                        </a>
+                    </h3>
+                    <p ax-view="price">$249.99</p>
+                    <p ax-view="rating">★★★★★ (4,102 reviews)</p>
+                    <button ax-click="add to compare">Compare</button>
+                </article>
+            </div>
+
+            <!-- Pagination -->
+            <nav ax-ctx="pagination">
+                <a
+                    ax-nav="previous page"
+                    ax-swap="region"
+                    href="/search?q=wireless+headphones&page=1"
+                    >← Previous</a
+                >
+                <span ax-view="page info">Page 2 / 48</span>
+                <a
+                    ax-nav="next page"
+                    ax-swap="region"
+                    href="/search?q=wireless+headphones&page=3"
+                    >Next →</a
+                >
+            </nav>
+        </div>
+    </body>
+</html>

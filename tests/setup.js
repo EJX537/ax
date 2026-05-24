@@ -18,3 +18,7 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.Event = window.Event;
 globalThis.Element = window.Element;
 globalThis.HTMLElement = window.HTMLElement;
+globalThis.HTMLInputElement = window.HTMLInputElement;
+globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
+globalThis.HTMLSelectElement = window.HTMLSelectElement;
+globalThis.HTMLAnchorElement = window.HTMLAnchorElement;

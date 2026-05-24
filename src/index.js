@@ -1,65 +1,217 @@
 /**
- * AX - semantic annotation schema for HTML.
- * Single-file implementation with JSDoc typing.
+ * AX core
+ *
+ * DOM annotations → tree-based DAG.
+ * Only ax-annotated elements are nodes. The tree is the relational map.
+ * Native HTML attributes are the contract — ax derives args from the DOM.
  */
 
-/** @typedef {{ name: string, defaultTemplate: string }} PrimitiveDef */
-/** @typedef {{ name: string, element: Element, primitives?: Record<string, any> }} ScopeEntry */
+/** @typedef {"click" | "view" | "edit" | "nav" | string} AxFnKind */
 
-/** @type {Set<string>} */
-const BUILTIN_TEMPLATES = new Set(["view", "item", "skill", "field"]);
+/**
+ * @typedef {Object} AxConfig
+ * @property {boolean} allowEval
+ */
 
-/** @type {Map<string, (e: any) => any>} */
-const templates = new Map();
+/**
+ * @typedef {Object} AxHookSet
+ * @property {string | undefined} before
+ * @property {string | undefined} on
+ * @property {string | undefined} after
+ */
 
-/** @type {Map<string, PrimitiveDef>} */
-const primitives = new Map([
-    ["ax-view", { name: "ax-view", defaultTemplate: "view" }],
-    ["ax-click", { name: "ax-click", defaultTemplate: "skill" }],
-    ["ax-edit", { name: "ax-edit", defaultTemplate: "skill" }],
-    ["ax-nav", { name: "ax-nav", defaultTemplate: "skill" }],
+/**
+ * A function descriptor in the compiled DAG.
+ * `on` is the primitive kind, `name` is the human label.
+ * `args` is a schema derived from HTML native attributes (edit/ext).
+ * @typedef {Object} AxFnEntry
+ * @property {AxFnKind} on
+ * @property {string} name
+ * @property {Record<string, string> | undefined} [args]
+ */
+
+/**
+ * A node in the internal tree.
+ * @typedef {Object} InternalNode
+ * @property {string} id
+ * @property {Element} el
+ * @property {AxFnEntry[]} fn
+ * @property {InternalNode | null} _parent
+ * @property {InternalNode[]} _children
+ * @property {string} scope
+ * @property {Record<string, string>} attrs
+ */
+
+/**
+ * Serialized node in scan output. `parent` and `children` are key refs.
+ * @typedef {Object} AxNode
+ * @property {string} id
+ * @property {string | null} parent
+ * @property {string[]} children
+ * @property {AxFnEntry[]} fn
+ * @property {string | undefined} scope
+ */
+
+/**
+ * @typedef {Object} AxScan
+ * @property {number} version
+ * @property {number} generatedAt
+ * @property {Record<string, string[]>} dag
+ * @property {AxNode[]} nodes
+ */
+
+/**
+ * @typedef {Object} AxInvokeResult
+ * @property {boolean} ok
+ * @property {boolean} [canceled]
+ * @property {any} [result]
+ * @property {string} [error]
+ */
+
+/**
+ * @typedef {Object} AxInvokeContext
+ * @property {"before" | "on" | "after"} phase
+ * @property {string} action
+ * @property {string | undefined} scope
+ * @property {Element} el
+ * @property {any} args
+ * @property {AxScan | null} scan
+ * @property {AxFnEntry | undefined} fnEntry
+ * @property {AxHookSet} hooks
+ * @property {boolean} canceled
+ * @property {any} result
+ * @property {string | undefined} [error]
+ */
+
+/**
+ * @typedef {Object} AxExtensionApi
+ * @property {(attr: string, def: { kind: AxFnKind }) => void} definePrimitive
+ * @property {() => AxScan | null} getScan
+ */
+
+/**
+ * @typedef {Object} AxExtension
+ * @property {(api: AxExtensionApi) => void} [init]
+ * @property {(ctx: { root: Element, scan: AxScan }) => void} [onScanStart]
+ * @property {(ctx: { node: AxNode, element: Element, scan: AxScan }) => void} [onNode]
+ * @property {(ctx: { root: Element, scan: AxScan }) => void} [onScanEnd]
+ * @property {(ctx: AxInvokeContext) => void} [beforeAction]
+ * @property {(ctx: AxInvokeContext) => any} [onInvoke]
+ * @property {(ctx: AxInvokeContext) => void} [afterAction]
+ */
+
+/** @type {Map<string, AxFnKind>} */
+const PRIMITIVE_KINDS = new Map([
+    ["ax-view", "view"],
+    ["ax-click", "click"],
+    ["ax-edit", "edit"],
+    ["ax-nav", "nav"],
 ]);
 
-/** @type {Map<string, ScopeEntry>} */
-const scopes = new Map();
+/** @type {Map<string, AxExtension>} */
+const extensions = new Map();
+
+/** @type {AxScan | null} */
+let lastScan = null;
+
+/** @type {WeakMap<Element, string>} */
+let elementToId = new WeakMap();
+
+let version = 0;
+
+/** @type {AxConfig} */
+const axConfig = {
+    allowEval: true,
+};
+
+/** @type {AxConfig} */
+const config = axConfig;
+
+// ── Helpers ────────────────────────────────────────────────────
 
 /**
+ * Get or assign a stable id for an element during scan.
+ * Uses `el.id` when available, warns on duplicate ids, falls back to generated key.
  * @param {Element} el
- * @param {string} name
- * @returns {string | null}
+ * @param {Set<string>} seenIds - per-scan set of already-claimed ids
+ * @returns {string}
  */
-function getAttr(el, name) {
-    if (el.hasAttribute(name)) return el.getAttribute(name);
-    const dataName = `data-${name}`;
-    if (el.hasAttribute(dataName)) return el.getAttribute(dataName);
-    return null;
+function getOrAssignId(el, seenIds) {
+    if (el.id) {
+        if (seenIds.has(el.id)) {
+            console.warn(`ax: duplicate id "${el.id}" on <${el.tagName.toLowerCase()}>, generating fallback`);
+            const id = `ax-${version}-${Math.random().toString(36).slice(2, 8)}`;
+            elementToId.set(el, id);
+            return id;
+        }
+        seenIds.add(el.id);
+        return el.id;
+    }
+    const existing = elementToId.get(el);
+    if (existing) return existing;
+    const id = `ax-${version}-${Math.random().toString(36).slice(2, 8)}`;
+    elementToId.set(el, id);
+    return id;
 }
 
 /**
  * @param {Element} el
- * @param {string} name
- * @returns {boolean}
+ * @returns {Record<string, string>}
  */
-function hasAttr(el, name) {
-    return el.hasAttribute(name) || el.hasAttribute(`data-${name}`);
+function readAXAttrs(el) {
+    /** @type {Record<string, string>} */
+    const out = {};
+    const names = el.getAttributeNames();
+    for (const name of names) {
+        if (!name.startsWith("ax-")) continue;
+        const value = el.getAttribute(name);
+        out[name] = value === null ? "" : value;
+    }
+    return out;
+}
+
+/**
+ * Read primitive entries (ax-view, ax-edit, ax-click, ax-nav) from attrs.
+ * @param {Record<string, string>} attrs
+ * @returns {{ attr: string, kind: AxFnKind, name: string }[]}
+ */
+function readPrimitiveEntries(attrs) {
+    /** @type {{ attr: string, kind: AxFnKind, name: string }[]} */
+    const entries = [];
+    for (const attr of Object.keys(attrs)) {
+        const kind = PRIMITIVE_KINDS.get(attr);
+        if (!kind) continue;
+        const raw = attrs[attr];
+        if (raw === undefined) continue;
+        const name = raw.trim();
+        if (!name) {
+            throw new Error(`${attr} requires a non-empty value`);
+        }
+        entries.push({ attr, kind, name });
+    }
+    return entries;
 }
 
 /**
  * @param {Element} el
  * @returns {boolean}
  */
-function isIgnored(el) {
-    if (!el || !(el instanceof Element)) return false;
-    // Check the element and all ancestors for ax-ignore
-    let current = /** @type {Element | null} */ (el);
-    while (current) {
-        if (hasAttr(current, "ax-ignore")) return true;
-        current = current.parentElement;
+function isUnderIgnore(el) {
+    /** @type {Element | null} */
+    let node = el;
+    while (node) {
+        if (
+            node.hasAttribute("ax-ignore") ||
+            node.hasAttribute("data-ax-ignore")
+        )
+            return true;
+        node = node.parentElement;
     }
     return false;
 }
 
 /**
+ * Derive input type from native HTML attributes.
  * @param {Element} el
  * @returns {string | undefined}
  */
@@ -68,577 +220,588 @@ function inferInputType(el) {
     if (tag === "textarea") return "textarea";
     if (tag === "select") return "select";
     if (tag === "input") {
-        const type = (el.getAttribute("type") || "text").toLowerCase();
-        return type;
+        const type = el.getAttribute("type");
+        return (type || "text").toLowerCase();
     }
     return undefined;
 }
 
 /**
- * @param {Element} el
- * @returns {{ primitive?: string, name?: string }[]}
+ * Read hook set from attributes for a given capability kind.
+ * @param {Record<string, string>} attrs
+ * @param {AxFnKind} kind
+ * @returns {AxHookSet}
  */
-function readPrimitives(el) {
-    /** @type {{ primitive?: string, name?: string }[]} */
-    const found = [];
-    const view = getAttr(el, "ax-view");
-    const click = getAttr(el, "ax-click");
-    const edit = getAttr(el, "ax-edit");
-    const nav = getAttr(el, "ax-nav");
-
-    if (view !== null) found.push({ primitive: "ax-view", name: view });
-    if (click !== null) found.push({ primitive: "ax-click", name: click });
-    if (edit !== null) found.push({ primitive: "ax-edit", name: edit });
-    if (nav !== null) found.push({ primitive: "ax-nav", name: nav });
-
-    return found;
+function readHooks(attrs, kind) {
+    /** @type {AxHookSet} */
+    const hooks = {};
+    const on =
+        attrs[`ax-on-${kind}`] ||
+        attrs[`ax-on${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
+    const before =
+        attrs[`ax-before-${kind}`] ||
+        attrs[`ax-before${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
+    const after =
+        attrs[`ax-after-${kind}`] ||
+        attrs[`ax-after${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
+    if (before) hooks.before = before;
+    if (on) hooks.on = on;
+    if (after) hooks.after = after;
+    return hooks;
 }
 
 /**
- * @param {Element} el
- * @param {string} primitive
- * @returns {{ before?: string, on?: string, after?: string }}
+ * Evaluate a hook string with HTMX-style eval.
+ * @param {string} raw
+ * @param {AxInvokeContext} ctx
+ * @returns {any}
  */
-function readHooks(el, primitive) {
-    const suffix = primitive.replace("ax-", "");
-    const cap = suffix.charAt(0).toUpperCase() + suffix.slice(1);
-    const before = getAttr(el, `ax-before${cap}`);
-    const on = getAttr(el, `ax-on${cap}`);
-    const after = getAttr(el, `ax-after${cap}`);
+function evalHook(raw, ctx) {
+    if (!config.allowEval) {
+        throw new Error("ax.config.allowEval is false — cannot evaluate hook");
+    }
+    try {
+        const fn = new Function("ctx", `return (${raw})(ctx);`);
+        return fn(ctx);
+    } catch (e) {
+        throw new Error(
+            `ax hook eval error: ${e instanceof Error ? e.message : String(e)}`,
+        );
+    }
+}
+
+/**
+ * Build args for an edit fn entry from native DOM attributes.
+ * Only meaningful for input-like elements (input, select, textarea).
+ * For container elements (form, div), returns empty — aggregation from
+ * children fills the schema.
+ * @param {Element} el
+ * @returns {Record<string, string>}
+ */
+function editFieldArgs(el) {
+    const name = el.getAttribute("ax-edit");
+    if (!name) return {};
+    const tag = el.tagName.toLowerCase();
+    // Only produce field-level args for actual input-like elements
+    if (tag !== "input" && tag !== "select" && tag !== "textarea") {
+        return {};
+    }
+    const type = inferInputType(el) || "text";
+    const required = el.hasAttribute("required") ? "" : "?";
+    return { [name.trim()]: type + required };
+}
+
+/**
+ * Collect all edit field args from a node's descendant subtree.
+ * Skips the current node's own edit entry — only merges from children.
+ * @param {InternalNode} node
+ * @returns {Record<string, string> | undefined}
+ */
+function collectEditArgs(node) {
+    /** @type {Record<string, string>} */
+    const merged = {};
+    let count = 0;
+
+    /**
+     * @param {InternalNode} n
+     */
+    function walkNode(n) {
+        /** @type {AxFnEntry | undefined} */
+        const editFn = n.fn.find(/** @param {AxFnEntry} f */ (f) => f.on === "edit");
+        if (editFn && editFn.args) {
+            Object.assign(merged, editFn.args);
+            count += Object.keys(editFn.args).length;
+        }
+        for (const child of n._children) {
+            walkNode(child);
+        }
+    }
+
+    // Start from children, skip the node itself
+    for (const child of node._children) {
+        walkNode(child);
+    }
+
+    return count > 0 ? merged : undefined;
+}
+
+// ── Scan ───────────────────────────────────────────────────────
+
+/**
+ * Walk the DOM and build the internal node tree, then serialize.
+ * Only ax-annotated elements become nodes (plus `<html>` as implicit root
+ * and elements with `ax-ctx` as scope boundaries).
+ * Non-ax elements are transparent — their ax children attach to the
+ * nearest ax ancestor.
+ * @param {Element} [root]
+ * @returns {AxScan}
+ */
+function scan(root) {
+    const r = root || document.documentElement;
+    if (!r) {
+        return {
+            version: ++version,
+            generatedAt: Date.now(),
+            dag: {},
+            nodes: [],
+        };
+    }
+
+    // Temporary scan for extension hooks during building
+    /** @type {AxScan} */
+    const buildScan = { version: 0, generatedAt: 0, dag: {}, nodes: [] };
+
+    // Track seen ids within this scan to warn on duplicates
+    /** @type {Set<string>} */
+    const seenIds = new Set();
+
+    for (const ext of extensions.values()) {
+        ext.onScanStart?.({ root: r, scan: buildScan });
+    }
+
+    // ── Build internal node tree ──
+
+    /** @type {Map<Element, InternalNode>} */
+    const nodeMap = new Map();
+    const localKeyMap = new Map();
+
+    /**
+     * Walk the DOM, creating InternalNode for each ax element.
+     * Non-ax elements are transparent — children climb to nearest ax ancestor.
+     * @param {Element} el - current DOM element
+     * @param {InternalNode | null} parent - nearest ax ancestor
+     * @param {string} scope - current scope name
+     * @param {boolean} ignore - whether subtree is ax-ignored
+     */
+    function walk(el, parent, scope, ignore) {
+        if (ignore || isUnderIgnore(el)) {
+            // Still recurse for scope boundaries that may override ignore?
+            // No — ax-ignore means entire subtree is excluded.
+            return;
+        }
+
+        const attrs = readAXAttrs(el);
+        const entries = readPrimitiveEntries(attrs);
+
+        const ctxAttr = attrs["ax-ctx"];
+        const elScope = ctxAttr && ctxAttr.trim() ? ctxAttr.trim() : scope;
+
+        // Determine if this element should be a tree node.
+        // It's a node if: it has primitives, or it has ax-ctx, or it's <html>
+        const isHtml = el === r;
+        const isScopeBoundary = ctxAttr !== undefined && ctxAttr.trim() !== "";
+        const hasPrimitives = entries.length > 0;
+
+        /** @type {InternalNode | null} */
+        let node = null;
+
+        if (isHtml || isScopeBoundary || hasPrimitives) {
+            const id = getOrAssignId(el, seenIds);
+            localKeyMap.set(el, id);
+
+            /** @type {AxFnEntry[]} */
+            const fn = [];
+
+            // Build fn entries from primitives
+            for (const entry of entries) {
+                /** @type {AxFnEntry} */
+                const f = { on: entry.kind, name: entry.name };
+
+                // For edit, derive args from native DOM attributes
+                if (entry.kind === "edit") {
+                    f.args = editFieldArgs(el);
+                }
+
+                fn.push(f);
+            }
+
+            node = {
+                id,
+                el,
+                fn,
+                _parent: null,
+                _children: [],
+                scope: elScope,
+                attrs,
+            };
+
+            // Link to parent
+            if (parent) {
+                node._parent = parent;
+                parent._children.push(node);
+            }
+
+            nodeMap.set(el, node);
+
+            // Build serialized node for extension hooks
+            const serializedNode = {
+                id: node.id,
+                parent: node._parent ? node._parent.id : null,
+                children: [],
+                fn: node.fn,
+                scope: node.scope,
+            };
+            buildScan.nodes.push(serializedNode);
+            buildScan.dag[node.id] = [];
+            for (const ext of extensions.values()) {
+                ext.onNode?.({ node: serializedNode, element: el, scan: buildScan });
+            }
+            // Change parent for descendants — new scope depth starts here
+            parent = node;
+        }
+
+        // Track scope for children
+        const childScope = ctxAttr && ctxAttr.trim() ? ctxAttr.trim() : scope;
+
+        // Recurse children (only element children, not text nodes)
+        for (const child of Array.from(el.children)) {
+            walk(child, parent, childScope, ignore);
+        }
+
+        // ── Post-order: aggregate edit args ──
+        // After all children walked, merge descendant edit args into
+        // the parent node's edit fn entry.
+        if (node) {
+            const editFn = node.fn.find((f) => f.on === "edit");
+            if (editFn && node._children.length > 0) {
+                const aggregated = collectEditArgs(node);
+                if (aggregated) {
+                    editFn.args = aggregated;
+                }
+            }
+        }
+    }
+
+    walk(r, null, "__root__", false);
+
+    // ── Finalize parent/children refs on serialized nodes ──
+    // (Nodes were already serialized during walk for extension hooks.)
+    for (const [el, internal] of nodeMap) {
+        const serialized = /** @type {AxNode} */ (
+            buildScan.nodes.find((n) => n.id === internal.id)
+        );
+        if (serialized) {
+            serialized.parent = internal._parent ? internal._parent.id : null;
+            serialized.children = internal._children.map((c) => c.id);
+        }
+        buildScan.dag[internal.id] = internal._children.map((c) => c.id);
+    }
+
+    const result = {
+        version: ++version,
+        generatedAt: Date.now(),
+        dag: buildScan.dag,
+        nodes: buildScan.nodes,
+    };
+
+    for (const ext of extensions.values()) {
+        ext.onScanEnd?.({ root: r, scan: result });
+    }
+
+    lastScan = result;
+    elementToId = localKeyMap;
+    return result;
+}
+
+/**
+ * Alias.
+ * @param {Element} [root]
+ * @returns {AxScan}
+ */
+function process(root) {
+    return scan(root);
+}
+
+// ── Invoke ─────────────────────────────────────────────────────
+
+/**
+ * @param {Element} el
+ * @param {AxScan} scan
+ * @returns {boolean}
+ */
+function elementInScan(el, scan) {
+    const id = elementToId.get(el);
+    if (!id) return false;
+    return scan.nodes.some((n) => n.id === id);
+}
+
+/**
+ * Find a node's fn entry by name and action type.
+ * @param {AxNode[]} nodes
+ * @param {Element} el
+ * @param {string} action
+ * @returns {{ node: AxNode | undefined, fn: AxFnEntry | undefined }}
+ */
+function findFn(nodes, el, action) {
+    // Need element-to-id mapping from the last scan
+    // We use the persistent elementToId WeakMap
+    const id = elementToId.get(el);
+    if (!id) return { node: undefined, fn: undefined };
+    const node = nodes.find((n) => n.id === id);
+    if (!node) return { node: undefined, fn: undefined };
+    const fn = node.fn.find((f) => f.on === action);
+    return { node, fn };
+}
+
+/**
+ * @param {string | Element | undefined} scopeOrEl
+ * @param {Element | string | undefined} elOrAction
+ * @param {string | any | undefined} actionOrArgs
+ * @param {any} [args]
+ * @returns {AxInvokeResult}
+ */
+function invoke(scopeOrEl, elOrAction, actionOrArgs, args) {
+    /** @type {string | undefined} */
+    let scope;
+    /** @type {Element | undefined} */
+    let el;
+    /** @type {string | undefined} */
+    let action;
+    /** @type {any} */
+    let payloadArgs;
+
+    if (
+        scopeOrEl &&
+        typeof scopeOrEl === "object" &&
+        scopeOrEl instanceof Element
+    ) {
+        el = scopeOrEl;
+        action = /** @type {string} */ (elOrAction);
+        payloadArgs = actionOrArgs;
+    } else {
+        if (typeof scopeOrEl === "string") scope = scopeOrEl;
+        el = /** @type {Element} */ (elOrAction);
+        action = /** @type {string} */ (actionOrArgs);
+        payloadArgs = args;
+    }
+
+    if (!el) {
+        return { ok: false, error: "No target element provided" };
+    }
+    if (!action) {
+        return { ok: false, error: "No action provided" };
+    }
+
+    // Scan fresh if stale or element not in current scan
+    if (!lastScan || !elementToId.has(el)) {
+        scan(document.body);
+    }
+
+    const currentScan = lastScan;
+    if (!currentScan || !currentScan.dag) {
+        return { ok: false, error: "No scan data available" };
+    }
+
+    // Find fn entry for this element + action
+    const { node: nodeEntry, fn: fnEntry } = findFn(
+        currentScan.nodes,
+        el,
+        action,
+    );
+
+    if (!fnEntry) {
+        return invokeDefault(el, action, payloadArgs);
+    }
+
+    // Resolve scope from the node's tree position
+    let resolvedScope = scope || "__root__";
+    if (nodeEntry && nodeEntry.scope) {
+        resolvedScope = nodeEntry.scope;
+    }
+
+    // Read hooks from the element's attrs for this action
+    const attrs = readAXAttrs(el);
+    const hooks = readHooks(attrs, /** @type {AxFnKind} */ (action));
+
+    /** @type {AxInvokeContext} */
+    const ctx = {
+        phase: "before",
+        action,
+        scope: resolvedScope,
+        el,
+        args: payloadArgs ?? {},
+        scan: currentScan,
+        fnEntry,
+        hooks,
+        canceled: false,
+        result: undefined,
+    };
+
+    // ── Before lifecycle ──
+    for (const ext of extensions.values()) {
+        ext.beforeAction?.(ctx);
+    }
+    if (ctx.canceled) {
+        return { ok: false, canceled: true, result: undefined, ...(ctx.error ? { error: ctx.error } : {}) };
+    }
+
+    const beforeResult = executeHook("before", hooks.before, ctx);
+    if (beforeResult !== undefined && beforeResult === false) {
+        return { ok: false, canceled: true, result: undefined, ...(ctx.error ? { error: ctx.error } : {}) };
+    }
+
+    // ── On lifecycle ──
+    ctx.phase = "on";
+    let onResult;
+    let override = false;
+
+    for (const ext of extensions.values()) {
+        if (ext.onInvoke) {
+            const r = ext.onInvoke(ctx);
+            if (r !== undefined) {
+                onResult = r;
+                override = true;
+            }
+        }
+    }
+
+    if (!override) {
+        onResult = executeHook("on", hooks.on, ctx);
+        if (onResult === undefined && !ctx.error) {
+            onResult = executeDefault(el, action, payloadArgs);
+        }
+    }
+
+    ctx.result = onResult;
+
+    // ── After lifecycle ──
+    ctx.phase = "after";
+    executeHook("after", hooks.after, ctx);
+
+    for (const ext of extensions.values()) {
+        ext.afterAction?.(ctx);
+    }
+
     return {
-        before: before !== null ? before : undefined,
-        on: on !== null ? on : undefined,
-        after: after !== null ? after : undefined,
+        ok: true,
+        result: ctx.result,
+        ...(ctx.error ? { error: ctx.error } : {}),
     };
 }
 
 /**
- * @param {Element} el
- * @returns {{ status?: string, reason?: string }}
+ * @param {"before" | "on" | "after"} phase
+ * @param {string | undefined} raw
+ * @param {AxInvokeContext} ctx
+ * @returns {any}
  */
-function readStatus(el) {
-    const disabled =
-        "disabled" in el
-            ? /** @type {HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement} */ (
-                  el
-              ).disabled
-            : el.hasAttribute("disabled");
+function executeHook(phase, raw, ctx) {
+    if (!raw) return undefined;
+    if (!config.allowEval) return undefined;
 
-    if (disabled) return { status: "disabled" };
-
-    const ariaDisabled = el.getAttribute("aria-disabled");
-    if (ariaDisabled === "true") return { status: "disabled" };
-
-    const busy = el.getAttribute("aria-busy");
-    if (busy === "true") return { status: "loading" };
-
-    if ("checkValidity" in el && typeof el.checkValidity === "function") {
-        try {
-            const valid = /** @type {HTMLInputElement} */ (el).checkValidity();
-            if (!valid) return { status: "blocked", reason: "invalid" };
-        } catch {
-            // ignore validation failures in non-form contexts
-        }
-    }
-
-    return {};
-}
-
-/**
- * @param {{ primitive?: string, name?: string }[]} list
- */
-function assertPrimitiveValues(list) {
-    for (const entry of list) {
-        if (!entry.primitive) continue;
-        if (entry.name === "" || entry.name == null) {
-            throw new Error(`${entry.primitive} requires a value`);
-        }
+    try {
+        return evalHook(raw, ctx);
+    } catch (e) {
+        ctx.error = String(e);
+        return undefined;
     }
 }
 
 /**
  * @param {Element} el
- * @returns {string | undefined}
+ * @param {string} action
+ * @param {any} args
+ * @returns {any}
  */
-function primaryPrimitive(el) {
-    const data = /** @type {any} */ (el)["__ax__internal"];
-    if (data && data.primitive) return data.primitive;
-    if (hasAttr(el, "ax-view")) return "ax-view";
-    if (hasAttr(el, "ax-edit")) return "ax-edit";
-    if (hasAttr(el, "ax-click")) return "ax-click";
-    if (hasAttr(el, "ax-nav")) return "ax-nav";
-    return undefined;
-}
-
-/**
- * @param {Element} el
- * @returns {string | undefined}
- */
-function primitiveName(el) {
-    const data = /** @type {any} */ (el)["__ax__internal"];
-    if (data && data.name) return data.name;
-    if (hasAttr(el, "ax-view")) return getAttr(el, "ax-view") || undefined;
-    if (hasAttr(el, "ax-edit")) return getAttr(el, "ax-edit") || undefined;
-    if (hasAttr(el, "ax-click")) return getAttr(el, "ax-click") || undefined;
-    if (hasAttr(el, "ax-nav")) return getAttr(el, "ax-nav") || undefined;
-    return undefined;
-}
-
-/**
- * @param {Element} el
- * @param {string} primitive
- * @param {string | undefined} name
- * @returns {boolean}
- */
-function acceptsFor(el, primitive, name) {
-    const data = /** @type {any} */ (el)["__ax__internal"];
-    const forValue = data?.for ?? getAttr(el, "ax-for");
-    if (!forValue) return true;
-    return forValue === name;
-}
-
-/**
- * @param {Element} el
- * @param {string} parentPrimitive
- * @returns {any[]}
- */
-function collectChildren(el, parentPrimitive) {
-    /** @type {any[]} */
-    const results = [];
-    const parentName = primitiveName(el);
-
-    for (const child of Array.from(el.children)) {
-        if (isIgnored(child)) continue;
-
-        const childPrimitive = primaryPrimitive(child);
-        if (childPrimitive) {
-            if (acceptsFor(child, parentPrimitive, parentName)) {
-                const childResult = walk(child, undefined, undefined);
-                if (childResult) results.push(childResult);
-            }
-            continue;
-        }
-
-        if (!acceptsFor(child, parentPrimitive, parentName)) {
-            continue;
-        }
-
-        const childResult = walk(child, undefined, undefined);
-        if (childResult) results.push(childResult);
+function executeDefault(el, action, args) {
+    if (action === "view") {
+        return (el.textContent || "").trim();
     }
-
-    return results;
-}
-
-/**
- * @param {Element} el
- * @returns {any[]}
- */
-function collectTemplates(el) {
-    /** @type {any[]} */
-    const all = [];
-    const own = getAttr(el, "ax-template");
-    if (own) all.push(own);
-
-    for (const child of Array.from(el.children)) {
-        if (isIgnored(child)) continue;
-        all.push(...collectTemplates(child));
+    if (action === "click") {
+        const clickable = /** @type {{ click?: () => void }} */ (el);
+        if (typeof clickable.click === "function") clickable.click();
+        return undefined;
     }
-
-    return all;
-}
-
-/**
- * @param {Element} el
- * @returns {any | undefined}
- */
-/**
- * Read a value from internal data or fall back to reading the attribute directly.
- * @param {Element} el
- * @param {string} dataKey
- * @param {string} attrName
- * @returns {string | undefined}
- */
-function resolveAttr(el, dataKey, attrName) {
-    const data = /** @type {any} */ (el)["__ax__internal"];
-    if (data && data[dataKey] !== undefined) return data[dataKey];
-    const val = getAttr(el, attrName);
-    return val !== null ? val : undefined;
-}
-
-/**
- * @param {Element} el
- * @returns {any[]}
- */
-function walkAll(el) {
-    const data = /** @type {any} */ (el)["__ax__internal"] || {};
-    const primitiveEntries = [];
-    if (data.view)
-        primitiveEntries.push({ primitive: "ax-view", name: data.view.name });
-    if (data.edit)
-        primitiveEntries.push({ primitive: "ax-edit", name: data.edit.name });
-    if (data.click)
-        primitiveEntries.push({ primitive: "ax-click", name: data.click.name });
-    if (data.nav)
-        primitiveEntries.push({ primitive: "ax-nav", name: data.nav.name });
-
-    if (primitiveEntries.length === 0) {
-        return [walk(el, undefined, undefined)].filter(Boolean);
-    }
-
-    return primitiveEntries
-        .map((entry) => walk(el, entry.primitive, entry.name))
-        .filter(Boolean);
-}
-
-/**
- * @param {Element} el
- * @param {string | undefined} forcedPrimitive
- * @param {string | undefined} forcedName
- * @returns {any | undefined}
- */
-function walk(el, forcedPrimitive, forcedName) {
-    if (isIgnored(el)) return undefined;
-
-    const data = /** @type {any} */ (el)["__ax__internal"] || {};
-    const primitive = forcedPrimitive || primaryPrimitive(el);
-    const name = forcedName || primitiveName(el) || "";
-
-    // Resolve template from internal data or directly from attribute
-    const template = resolveAttr(el, "template", "ax-template");
-    const swap = resolveAttr(el, "swap", "ax-swap");
-
-    if (!primitive) {
-        if (template) {
-            return {
-                type: "item",
-                text: (el.textContent || "").trim(),
-                template: template,
-            };
-        }
-        return { type: "item", text: (el.textContent || "").trim() };
-    }
-
-    if (primitive === "ax-view") {
-        const children = collectChildren(el, primitive);
-        const templatesList = collectTemplates(el);
-        const result = {
-            type: "view",
-            name,
-            children,
-            template: template,
-            templates: templatesList.length ? templatesList : undefined,
-            hooks: forcedPrimitive ? data.view?.hooks : data.hooks,
-            status: forcedPrimitive ? data.view?.status : data.status,
-        };
-        return result;
-    }
-
-    if (primitive === "ax-edit") {
-        const fields = [];
-        for (const child of Array.from(
-            el.querySelectorAll("[ax-edit], [data-ax-edit]"),
-        )) {
-            if (child === el) continue;
-            if (isIgnored(child)) continue;
-            const childData = /** @type {any} */ (child)["__ax__internal"];
-            // Child must be a field (not another skill-level ax-edit)
-            const childTemplate =
-                childData?.template ||
-                resolveAttr(child, "template", "ax-template");
-            if (childData && childTemplate && childTemplate !== "field")
-                continue;
-            if (!acceptsFor(child, primitive, name)) continue;
-            const fieldName =
-                childData?.name || getAttr(child, "ax-edit") || "";
-            const inputType = childData?.inputType || inferInputType(child);
-            let value;
-            if (inputType === "checkbox" || inputType === "radio") {
-                value = /** @type {HTMLInputElement} */ (child).checked;
-            } else if ("value" in child) {
-                value =
-                    /** @type {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} */ (
-                        child
-                    ).value;
+    if (
+        action === "edit" &&
+        args &&
+        Object.prototype.hasOwnProperty.call(args, "value")
+    ) {
+        if (el instanceof HTMLInputElement) {
+            const type = (el.type || "text").toLowerCase();
+            if (type === "checkbox" || type === "radio") {
+                el.checked = Boolean(args.value);
             } else {
-                value = (child.textContent || "").trim();
+                el.value = String(args.value);
             }
-            fields.push({
-                type: "field",
-                name: fieldName,
-                value,
-                inputType,
-            });
+        } else if (
+            el instanceof HTMLTextAreaElement ||
+            el instanceof HTMLSelectElement
+        ) {
+            el.value = String(args.value);
         }
-
-        return {
-            type: "skill",
-            name,
-            children: fields,
-            template: template,
-            hooks: forcedPrimitive ? data.edit?.hooks : data.hooks,
-            status: forcedPrimitive ? data.edit?.status : data.status,
-        };
+        return undefined;
     }
-
-    if (primitive === "ax-click") {
-        const children = collectChildren(el, primitive);
-        return {
-            type: "skill",
-            name,
-            text: (el.textContent || "").trim(),
-            children,
-            template: template,
-            hooks: forcedPrimitive ? data.click?.hooks : data.hooks,
-            status: forcedPrimitive ? data.click?.status : data.status,
-        };
+    if (action === "nav") {
+        if (el instanceof HTMLAnchorElement) {
+            return el.getAttribute("href") || el.href;
+        }
+        const clickable = /** @type {{ click?: () => void }} */ (el);
+        if (typeof clickable.click === "function") clickable.click();
+        return undefined;
     }
-
-    if (primitive === "ax-nav") {
-        return {
-            type: "skill",
-            name,
-            text: (el.textContent || "").trim(),
-            href: el.getAttribute("href") || undefined,
-            swap: swap,
-            template: template,
-            hooks: forcedPrimitive ? data.nav?.hooks : data.hooks,
-            status: forcedPrimitive ? data.nav?.status : data.status,
-        };
-    }
-
     return undefined;
 }
 
 /**
- * @param {Element} root
+ * @param {Element} el
+ * @param {string} action
+ * @param {any} args
+ * @returns {AxInvokeResult}
  */
-function process(root) {
-    const start = root || document.body;
-    if (!start) return;
-    // Clear previously registered scopes — we start fresh
-    scopes.clear();
-
-    /**
-     * @param {Element} el
-     * @param {{ scope?: string, viewName?: string, editName?: string, siblingScopes?: Set<string> }} ctx
-     */
-    function visit(el, ctx) {
-        if (isIgnored(el)) return;
-
-        const primitivesFound = readPrimitives(el);
-        assertPrimitiveValues(primitivesFound);
-
-        const contentScope = getAttr(el, "ax-content");
-        const viewName = getAttr(el, "ax-view");
-        const editName = getAttr(el, "ax-edit");
-        const template = getAttr(el, "ax-template");
-        const forValue = getAttr(el, "ax-for");
-        const swapValue = getAttr(el, "ax-swap");
-
-        const definesScope =
-            (contentScope !== null && contentScope !== "") ||
-            (viewName !== null && viewName !== "");
-
-        const activeScope = definesScope
-            ? contentScope && contentScope !== ""
-                ? contentScope
-                : viewName || ctx.scope
-            : ctx.scope;
-
-        if (activeScope && definesScope && ctx.siblingScopes) {
-            if (ctx.siblingScopes.has(activeScope)) {
-                throw new Error(
-                    `Duplicate scope name at same level: ${activeScope}`,
-                );
-            }
-            ctx.siblingScopes.add(activeScope);
-        }
-
-        const hasExplicit =
-            primitivesFound.length > 0 ||
-            contentScope !== null ||
-            template !== null ||
-            forValue !== null ||
-            swapValue !== null;
-
-        const hasViewAncestor = Boolean(ctx.viewName);
-        const hasEditAncestor = Boolean(ctx.editName);
-
-        let data = /** @type {any} */ (el)["__ax__internal"];
-        if (!data && (hasExplicit || hasViewAncestor)) {
-            data = {};
-            /** @type {any} */ (el)["__ax__internal"] = data;
-        }
-
-        if (data) {
-            if (activeScope) data.scope = activeScope;
-            if (forValue) data.for = forValue;
-            if (swapValue) data.swap = swapValue;
-        }
-
-        const primitiveNames = primitivesFound
-            .map((p) => p.primitive)
-            .filter(Boolean);
-
-        if (data && primitiveNames.length === 1) {
-            const prim = primitiveNames[0] || "";
-            const name = primitivesFound.find(
-                (p) => p.primitive === prim,
-            )?.name;
-            data.primitive = prim;
-            data.name = name;
-            data.hooks = readHooks(el, prim);
-            data.status = readStatus(el);
-        }
-
-        if (data && primitiveNames.length > 1) {
-            for (const prim of primitivesFound) {
-                if (!prim.primitive) continue;
-                if (prim.primitive === "ax-view")
-                    data.view = {
-                        name: prim.name,
-                        hooks: readHooks(el, "ax-view"),
-                        status: readStatus(el),
-                    };
-                if (prim.primitive === "ax-edit")
-                    data.edit = {
-                        name: prim.name,
-                        hooks: readHooks(el, "ax-edit"),
-                        status: readStatus(el),
-                    };
-                if (prim.primitive === "ax-click")
-                    data.click = {
-                        name: prim.name,
-                        hooks: readHooks(el, "ax-click"),
-                        status: readStatus(el),
-                    };
-                if (prim.primitive === "ax-nav")
-                    data.nav = {
-                        name: prim.name,
-                        hooks: readHooks(el, "ax-nav"),
-                        status: readStatus(el),
-                    };
-            }
-        }
-
-        if (data) {
-            if (template) {
-                data.template = template;
-            } else if (primitiveNames.includes("ax-view")) {
-                data.template = "view";
-            } else if (primitiveNames.includes("ax-edit")) {
-                data.template = hasEditAncestor ? "field" : "skill";
-            } else if (primitiveNames.includes("ax-click")) {
-                data.template = "skill";
-            } else if (primitiveNames.includes("ax-nav")) {
-                data.template = "skill";
-            } else if (hasViewAncestor) {
-                data.template = "item";
-            }
-        }
-
-        if (data && primitiveNames.includes("ax-edit")) {
-            data.inputType = inferInputType(el);
-        }
-
-        if (activeScope && definesScope) {
-            scopes.set(activeScope, {
-                name: activeScope,
-                element: el,
-                primitives: data,
-            });
-        }
-
-        const nextCtx = {
-            scope: activeScope,
-            viewName: viewName || ctx.viewName,
-            editName: editName || ctx.editName,
-            siblingScopes: new Set(),
-        };
-
-        for (const child of Array.from(el.children)) {
-            visit(child, nextCtx);
-        }
+function invokeDefault(el, action, args) {
+    try {
+        const result = executeDefault(el, action, args);
+        return { ok: true, result };
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
-
-    visit(start, {
-        scope: undefined,
-        viewName: undefined,
-        editName: undefined,
-        siblingScopes: new Set(),
-    });
 }
 
+// ── API ────────────────────────────────────────────────────────
+
 /**
- * @returns {any}
+ * @param {string} attr
+ * @param {{ kind: AxFnKind }} def
  */
-/**
- * @returns {any}
- */
-function scan() {
-    if (!document || !document.body) return [];
-    process(document.body);
-    const roots = Array.from(
-        document.body.querySelectorAll(
-            "[ax-view], [data-ax-view], [ax-edit], [data-ax-edit], [ax-click], [data-ax-click], [ax-nav], [data-ax-nav]",
-        ),
-    );
-    return roots.flatMap((el) => walkAll(el)).filter(Boolean);
+function definePrimitive(attr, def) {
+    if (!attr.startsWith("ax-")) {
+        throw new Error(`Primitive "${attr}" must start with "ax-"`);
+    }
+    if (PRIMITIVE_KINDS.has(attr)) {
+        throw new Error(`Primitive "${attr}" already exists`);
+    }
+    PRIMITIVE_KINDS.set(attr, def.kind);
 }
 
 /**
  * @param {string} name
- * @returns {ScopeEntry | undefined}
+ * @param {AxExtension} extension
  */
-function get(name) {
-    if (!scopes.has(name)) {
-        process(document.body);
-    }
-    return scopes.get(name);
+function defineExtension(name, extension) {
+    const api = {
+        definePrimitive,
+        getScan: () => lastScan,
+    };
+    extension.init?.(api);
+    extensions.set(name, extension);
 }
 
 /**
  * @param {string} name
- * @param {(e: any) => any} fn
  */
-function defineTemplate(name, fn) {
-    if (BUILTIN_TEMPLATES.has(name)) {
-        throw new Error(
-            `Template ${name} is built-in and cannot be overridden`,
-        );
-    }
-    templates.set(name, fn);
+function removeExtension(name) {
+    extensions.delete(name);
 }
 
-/**
- * @param {string} name
- * @param {{ default: string }} def
- */
-function definePrimitive(name, def) {
-    if (primitives.has(name)) {
-        throw new Error(`Primitive ${name} already exists`);
-    }
-    primitives.set(name, { name, defaultTemplate: def.default });
-}
-
-const ax = {
-    process,
+const publicAPI = {
     scan,
-    get,
-    walk,
-    defineTemplate,
+    process,
+    invoke,
     definePrimitive,
+    defineExtension,
+    removeExtension,
+    config: axConfig,
 };
 
-if (typeof document !== "undefined") {
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () =>
-            process(document.body),
-        );
-    } else {
-        process(document.body);
-    }
-}
-
-export default ax;
+export default publicAPI;
