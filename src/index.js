@@ -4,6 +4,10 @@
  * DOM annotations → tree-based DAG.
  * Only ax-annotated elements are nodes. The tree is the relational map.
  * Native HTML attributes are the contract — ax derives args from the DOM.
+ *
+ * No allocating array methods (find, some, map, filter, reduce, forEach).
+ * No Object.keys(). No Array.from().
+ * All manual for loops to avoid GC pressure.
  */
 
 /** @typedef {"click" | "view" | "edit" | "nav" | string} AxFnKind */
@@ -150,9 +154,17 @@ const ax = (function () {
         if (el.id) {
             if (seenIds.has(el.id)) {
                 console.warn(
-                    `ax: duplicate id "${el.id}" on <${el.tagName.toLowerCase()}>, generating fallback`,
+                    'ax: duplicate id "' +
+                        el.id +
+                        '" on <' +
+                        el.tagName.toLowerCase() +
+                        ">, generating fallback",
                 );
-                const id = `ax-${version}-${Math.random().toString(36).slice(2, 8)}`;
+                const id =
+                    "ax-" +
+                    version +
+                    "-" +
+                    Math.random().toString(36).slice(2, 8);
                 elementToId.set(el, id);
                 return id;
             }
@@ -161,7 +173,8 @@ const ax = (function () {
         }
         const existing = elementToId.get(el);
         if (existing) return existing;
-        const id = `ax-${version}-${Math.random().toString(36).slice(2, 8)}`;
+        const id =
+            "ax-" + version + "-" + Math.random().toString(36).slice(2, 8);
         elementToId.set(el, id);
         return id;
     }
@@ -174,10 +187,12 @@ const ax = (function () {
         /** @type {Record<string, string>} */
         const out = {};
         const names = el.getAttributeNames();
-        for (const name of names) {
+        let i = 0;
+        const len = names.length;
+        for (; i < len; i++) {
+            const name = names[i];
             if (!name.startsWith("ax-")) continue;
-            const value = el.getAttribute(name);
-            out[name] = value === null ? "" : value;
+            out[name] = el.getAttribute(name) || "";
         }
         return out;
     }
@@ -190,16 +205,18 @@ const ax = (function () {
     function readPrimitiveEntries(attrs) {
         /** @type {{ attr: string, kind: AxFnKind, name: string }[]} */
         const entries = [];
-        for (const attr of Object.keys(attrs)) {
+        let attr;
+        for (attr in attrs) {
+            if (!Object.prototype.hasOwnProperty.call(attrs, attr)) continue;
             const kind = PRIMITIVE_KINDS.get(attr);
             if (!kind) continue;
             const raw = attrs[attr];
             if (raw === undefined) continue;
             const name = raw.trim();
             if (!name) {
-                throw new Error(`${attr} requires a non-empty value`);
+                throw new Error(attr + " requires a non-empty value");
             }
-            entries.push({ attr, kind, name });
+            entries.push({ attr: attr, kind: kind, name: name });
         }
         return entries;
     }
@@ -249,20 +266,20 @@ const ax = (function () {
         const hooks = {};
         const suffix = kind.charAt(0).toUpperCase() + kind.slice(1);
         const on =
-            attrs[`ax-on${suffix}`] ||
-            attrs[`data-ax-on${suffix}`] ||
-            attrs[`ax-on${kind}`] ||
-            attrs[`data-ax-on${kind}`];
+            attrs["ax-on" + suffix] ||
+            attrs["data-ax-on" + suffix] ||
+            attrs["ax-on" + kind] ||
+            attrs["data-ax-on" + kind];
         const before =
-            attrs[`ax-before${suffix}`] ||
-            attrs[`data-ax-before${suffix}`] ||
-            attrs[`ax-before${kind}`] ||
-            attrs[`data-ax-before${kind}`];
+            attrs["ax-before" + suffix] ||
+            attrs["data-ax-before" + suffix] ||
+            attrs["ax-before" + kind] ||
+            attrs["data-ax-before" + kind];
         const after =
-            attrs[`ax-after${suffix}`] ||
-            attrs[`data-ax-after${suffix}`] ||
-            attrs[`ax-after${kind}`] ||
-            attrs[`data-ax-after${kind}`];
+            attrs["ax-after" + suffix] ||
+            attrs["data-ax-after" + suffix] ||
+            attrs["ax-after" + kind] ||
+            attrs["data-ax-after" + kind];
         if (before) hooks.before = before;
         if (on) hooks.on = on;
         if (after) hooks.after = after;
@@ -282,11 +299,12 @@ const ax = (function () {
             );
         }
         try {
-            const fn = new Function("ctx", `return (${raw})(ctx);`);
+            const fn = new Function("ctx", "return (" + raw + ")(ctx);");
             return fn(ctx);
         } catch (e) {
             throw new Error(
-                `ax hook eval error: ${e instanceof Error ? e.message : String(e)}`,
+                "ax hook eval error: " +
+                    (e instanceof Error ? e.message : String(e)),
             );
         }
     }
@@ -309,7 +327,76 @@ const ax = (function () {
         }
         const type = inferInputType(el) || "text";
         const required = el.hasAttribute("required") ? "" : "?";
-        return { [name.trim()]: type + required };
+        /** @type {Record<string, string>} */
+        const obj = {};
+        obj[name.trim()] = type + required;
+        return obj;
+    }
+
+    /**
+     * Find first fn entry matching `on` in a node's fn array.
+     * Returns the entry or undefined.
+     * Manual loop — no find().
+     * @param {AxFnEntry[]} fnArr
+     * @param {string} on
+     * @returns {AxFnEntry | undefined}
+     */
+    function findFnEntry(fnArr, on) {
+        let i = 0;
+        const len = fnArr.length;
+        for (; i < len; i++) {
+            if (fnArr[i].on === on) return fnArr[i];
+        }
+        return undefined;
+    }
+
+    /**
+     * Find a node by id in a nodes array.
+     * Manual loop — no find().
+     * @param {AxNode[]} nodes
+     * @param {string} id
+     * @returns {AxNode | undefined}
+     */
+    function findNodeById(nodes, id) {
+        let i = 0;
+        const len = nodes.length;
+        for (; i < len; i++) {
+            if (nodes[i].id === id) return nodes[i];
+        }
+        return undefined;
+    }
+
+    /**
+     * Check if a node id exists in a nodes array.
+     * Manual loop — no some().
+     * @param {AxNode[]} nodes
+     * @param {string} id
+     * @returns {boolean}
+     */
+    function hasNodeId(nodes, id) {
+        let i = 0;
+        const len = nodes.length;
+        for (; i < len; i++) {
+            if (nodes[i].id === id) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Collect child ids into an array.
+     * Manual loop — no map().
+     * @param {InternalNode[]} children
+     * @returns {string[]}
+     */
+    function collectChildIds(children) {
+        /** @type {string[]} */
+        const ids = [];
+        let i = 0;
+        const len = children.length;
+        for (; i < len; i++) {
+            ids.push(children[i].id);
+        }
+        return ids;
     }
 
     /**
@@ -320,29 +407,37 @@ const ax = (function () {
      */
     function collectEditArgs(node) {
         /** @type {Record<string, string>} */
-        const merged = {};
+        const merged = /** @type {Record<string, string>} */ ({});
         let count = 0;
 
         /**
          * @param {InternalNode} n
          */
         function walkNode(n) {
-            /** @type {AxFnEntry | undefined} */
-            const editFn = n.fn.find(
-                /** @param {AxFnEntry} f */ (f) => f.on === "edit",
-            );
+            const editFn = findFnEntry(n.fn, "edit");
             if (editFn && editFn.args) {
-                Object.assign(merged, editFn.args);
-                count += Object.keys(editFn.args).length;
+                for (const k in editFn.args) {
+                    if (!Object.prototype.hasOwnProperty.call(editFn.args, k))
+                        continue;
+                    const val = editFn.args[k];
+                    if (val !== undefined) {
+                        merged[k] = val;
+                        count++;
+                    }
+                }
             }
-            for (const child of n._children) {
-                walkNode(child);
+            let ci = 0;
+            const clen = n._children.length;
+            for (; ci < clen; ci++) {
+                walkNode(n._children[ci]);
             }
         }
 
         // Start from children, skip the node itself
-        for (const child of node._children) {
-            walkNode(child);
+        let ci = 0;
+        const clen = node._children.length;
+        for (; ci < clen; ci++) {
+            walkNode(node._children[ci]);
         }
 
         return count > 0 ? merged : undefined;
@@ -379,7 +474,7 @@ const ax = (function () {
         const seenIds = new Set();
 
         for (const ext of extensions.values()) {
-            ext.onScanStart?.({ root: r, scan: buildScan });
+            if (ext.onScanStart) ext.onScanStart({ root: r, scan: buildScan });
         }
 
         // ── Build internal node tree ──
@@ -398,8 +493,6 @@ const ax = (function () {
          */
         function walk(el, parent, scope, ignore) {
             if (ignore || isUnderIgnore(el)) {
-                // Still recurse for scope boundaries that may override ignore?
-                // No — ax-ignore means entire subtree is excluded.
                 return;
             }
 
@@ -427,7 +520,10 @@ const ax = (function () {
                 const fn = [];
 
                 // Build fn entries from primitives
-                for (const entry of entries) {
+                let ei = 0;
+                const elen = entries.length;
+                for (; ei < elen; ei++) {
+                    const entry = entries[ei];
                     /** @type {AxFnEntry} */
                     const f = { on: entry.kind, name: entry.name };
 
@@ -440,13 +536,13 @@ const ax = (function () {
                 }
 
                 node = {
-                    id,
-                    el,
-                    fn,
+                    id: id,
+                    el: el,
+                    fn: fn,
                     _parent: null,
                     _children: [],
                     scope: elScope,
-                    attrs,
+                    attrs: attrs,
                 };
                 elementToScope.set(el, elScope);
 
@@ -468,11 +564,13 @@ const ax = (function () {
                 buildScan.nodes.push(serializedNode);
                 buildScan.dag[node.id] = [];
                 for (const ext of extensions.values()) {
-                    ext.onNode?.({
-                        node: serializedNode,
-                        element: el,
-                        scan: buildScan,
-                    });
+                    if (ext.onNode) {
+                        ext.onNode({
+                            node: serializedNode,
+                            element: el,
+                            scan: buildScan,
+                        });
+                    }
                 }
                 // Change parent for descendants — new scope depth starts here
                 parent = node;
@@ -483,15 +581,19 @@ const ax = (function () {
                 ctxAttr && ctxAttr.trim() ? ctxAttr.trim() : scope;
 
             // Recurse children (only element children, not text nodes)
-            for (const child of Array.from(el.children)) {
-                walk(child, parent, childScope, ignore);
+            // Use indexed for loop instead of Array.from() / for-of
+            const childEls = el.children;
+            let ci = 0;
+            const clen = childEls.length;
+            for (; ci < clen; ci++) {
+                walk(childEls[ci], parent, childScope, ignore);
             }
 
             // ── Post-order: aggregate edit args ──
             // After all children walked, merge descendant edit args into
             // the parent node's edit fn entry.
             if (node) {
-                const editFn = node.fn.find((f) => f.on === "edit");
+                const editFn = findFnEntry(node.fn, "edit");
                 if (editFn && node._children.length > 0) {
                     const aggregated = collectEditArgs(node);
                     if (aggregated) {
@@ -505,17 +607,16 @@ const ax = (function () {
 
         // ── Finalize parent/children refs on serialized nodes ──
         // (Nodes were already serialized during walk for extension hooks.)
-        for (const [el, internal] of nodeMap) {
-            const serialized = /** @type {AxNode} */ (
-                buildScan.nodes.find((n) => n.id === internal.id)
-            );
+        for (const entry of nodeMap) {
+            const internal = entry[1];
+            const serialized = findNodeById(buildScan.nodes, internal.id);
             if (serialized) {
                 serialized.parent = internal._parent
                     ? internal._parent.id
                     : null;
-                serialized.children = internal._children.map((c) => c.id);
+                serialized.children = collectChildIds(internal._children);
             }
-            buildScan.dag[internal.id] = internal._children.map((c) => c.id);
+            buildScan.dag[internal.id] = collectChildIds(internal._children);
         }
 
         const result = {
@@ -526,7 +627,7 @@ const ax = (function () {
         };
 
         for (const ext of extensions.values()) {
-            ext.onScanEnd?.({ root: r, scan: result });
+            if (ext.onScanEnd) ext.onScanEnd({ root: r, scan: result });
         }
 
         lastScan = result;
@@ -546,6 +647,8 @@ const ax = (function () {
     // ── Invoke ─────────────────────────────────────────────────────
 
     /**
+     * Check if an element's id exists in a scan's nodes.
+     * Manual loop — no some().
      * @param {Element} el
      * @param {AxScan} scan
      * @returns {boolean}
@@ -553,11 +656,12 @@ const ax = (function () {
     function elementInScan(el, scan) {
         const id = elementToId.get(el);
         if (!id) return false;
-        return scan.nodes.some((n) => n.id === id);
+        return hasNodeId(scan.nodes, id);
     }
 
     /**
      * Find a node's fn entry by name and action type.
+     * Manual loops — no find().
      * @param {AxNode[]} nodes
      * @param {Element} el
      * @param {string} action
@@ -568,10 +672,10 @@ const ax = (function () {
         // We use the persistent elementToId WeakMap
         const id = elementToId.get(el);
         if (!id) return { node: undefined, fn: undefined };
-        const node = nodes.find((n) => n.id === id);
+        const node = findNodeById(nodes, id);
         if (!node) return { node: undefined, fn: undefined };
-        const fn = node.fn.find((f) => f.on === action);
-        return { node, fn };
+        const fn = findFnEntry(node.fn, action);
+        return { node: node, fn: fn };
     }
 
     /**
@@ -624,11 +728,9 @@ const ax = (function () {
         }
 
         // Find fn entry for this element + action
-        const { node: nodeEntry, fn: fnEntry } = findFn(
-            currentScan.nodes,
-            el,
-            action,
-        );
+        const found = findFn(currentScan.nodes, el, action);
+        const nodeEntry = found.node;
+        const fnEntry = found.fn;
 
         if (!fnEntry) {
             return invokeDefault(el, action, payloadArgs);
@@ -644,38 +746,42 @@ const ax = (function () {
         /** @type {AxInvokeContext} */
         const ctx = {
             phase: "before",
-            action,
+            action: action,
             scope: resolvedScope,
-            el,
+            el: el,
             args: payloadArgs ?? {},
             scan: currentScan,
-            fnEntry,
-            hooks,
+            fnEntry: fnEntry,
+            hooks: hooks,
             canceled: false,
             result: undefined,
         };
 
         // ── Before lifecycle ──
         for (const ext of extensions.values()) {
-            ext.beforeAction?.(ctx);
+            if (ext.beforeAction) ext.beforeAction(ctx);
         }
         if (ctx.canceled) {
-            return {
+            /** @type {AxInvokeResult} */
+            const beforeCancelResult = {
                 ok: false,
                 canceled: true,
                 result: undefined,
-                ...(ctx.error ? { error: ctx.error } : {}),
             };
+            if (ctx.error) beforeCancelResult.error = ctx.error;
+            return beforeCancelResult;
         }
 
         const beforeResult = executeHook("before", hooks.before, ctx);
         if (beforeResult !== undefined && beforeResult === false) {
-            return {
+            /** @type {AxInvokeResult} */
+            const beforeHookCancelResult = {
                 ok: false,
                 canceled: true,
                 result: undefined,
-                ...(ctx.error ? { error: ctx.error } : {}),
             };
+            if (ctx.error) beforeHookCancelResult.error = ctx.error;
+            return beforeHookCancelResult;
         }
 
         // ── On lifecycle ──
@@ -707,14 +813,16 @@ const ax = (function () {
         executeHook("after", hooks.after, ctx);
 
         for (const ext of extensions.values()) {
-            ext.afterAction?.(ctx);
+            if (ext.afterAction) ext.afterAction(ctx);
         }
 
-        return {
+        /** @type {AxInvokeResult} */
+        const invokeResult = {
             ok: true,
             result: ctx.result,
-            ...(ctx.error ? { error: ctx.error } : {}),
         };
+        if (ctx.error) invokeResult.error = ctx.error;
+        return invokeResult;
     }
 
     /**
@@ -746,7 +854,8 @@ const ax = (function () {
             return (el.textContent || "").trim();
         }
         if (action === "click") {
-            const clickable = /** @type {{ click?: () => void }} */ (el);
+            /** @type {{ click?: () => void }} */
+            const clickable = /** @type {any} */ (el);
             if (typeof clickable.click === "function") clickable.click();
             return undefined;
         }
@@ -774,7 +883,8 @@ const ax = (function () {
             if (el instanceof HTMLAnchorElement) {
                 return el.getAttribute("href") || el.href;
             }
-            const clickable = /** @type {{ click?: () => void }} */ (el);
+            /** @type {{ click?: () => void }} */
+            const clickable = /** @type {any} */ (el);
             if (typeof clickable.click === "function") clickable.click();
             return undefined;
         }
@@ -790,7 +900,7 @@ const ax = (function () {
     function invokeDefault(el, action, args) {
         try {
             const result = executeDefault(el, action, args);
-            return { ok: true, result };
+            return { ok: true, result: result };
         } catch (e) {
             return {
                 ok: false,
@@ -807,10 +917,10 @@ const ax = (function () {
      */
     function definePrimitive(attr, def) {
         if (!attr.startsWith("ax-")) {
-            throw new Error(`Primitive "${attr}" must start with "ax-"`);
+            throw new Error('Primitive "' + attr + '" must start with "ax-"');
         }
         if (PRIMITIVE_KINDS.has(attr)) {
-            throw new Error(`Primitive "${attr}" already exists`);
+            throw new Error('Primitive "' + attr + '" already exists');
         }
         PRIMITIVE_KINDS.set(attr, def.kind);
     }
@@ -821,10 +931,12 @@ const ax = (function () {
      */
     function defineExtension(name, extension) {
         const api = {
-            definePrimitive,
-            getScan: () => lastScan,
+            definePrimitive: definePrimitive,
+            getScan: function () {
+                return lastScan;
+            },
         };
-        extension.init?.(api);
+        if (extension.init) extension.init(api);
         extensions.set(name, extension);
     }
 
@@ -836,55 +948,107 @@ const ax = (function () {
     }
 
     /**
+     * Check whether an element (or any descendant) has an ax-* or data-ax-* attribute.
+     * Walks the subtree up to a configurable depth to find ax annotations.
+     * @param {Node} node
+     * @returns {boolean}
+     */
+    function subtreeHasAX(node) {
+        if (node.nodeType !== 1) return false;
+        const el = /** @type {Element} */ (node);
+        // Check the element itself
+        const names = el.getAttributeNames();
+        let i = 0;
+        const len = names.length;
+        for (; i < len; i++) {
+            const name = names[i];
+            if (name.startsWith("ax-") || name.startsWith("data-ax-"))
+                return true;
+        }
+        // Walk direct children (one level deep — enough for most SPA patterns)
+        // In practice, ax annotations are in the direct child markup, not deep buried.
+        const kids = el.children;
+        let ci = 0;
+        const clen = kids.length;
+        for (; ci < clen; ci++) {
+            const child = kids[ci];
+            const cnames = child.getAttributeNames();
+            let cni = 0;
+            const cnlen = cnames.length;
+            for (; cni < cnlen; cni++) {
+                if (
+                    cnames[cni].startsWith("ax-") ||
+                    cnames[cni].startsWith("data-ax-")
+                )
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check whether a mutation record is relevant to ax.
+     * Returns true only when actual ax-annotated elements are involved.
+     * For childList: checks added/removed nodes for ax attributes.
+     * For attributes: checks if the changed attribute is ax-related.
+     * @param {MutationRecord} m
+     * @returns {boolean}
+     */
+    function isAXMutation(m) {
+        if (m.type === "childList") {
+            // Check added nodes
+            let ai = 0;
+            const alen = m.addedNodes.length;
+            for (; ai < alen; ai++) {
+                if (subtreeHasAX(m.addedNodes[ai])) return true;
+            }
+            // Check removed nodes (walk one level deep for containers with ax children)
+            let ri = 0;
+            const rlen = m.removedNodes.length;
+            for (; ri < rlen; ri++) {
+                if (subtreeHasAX(m.removedNodes[ri])) return true;
+            }
+            return false;
+        }
+        const name = m.attributeName;
+        if (!name) return false;
+        return name.startsWith("ax-") || name.startsWith("data-ax-");
+    }
+
+    /**
      * Start watching the DOM for mutations that affect ax elements.
      * Invalidates the scan cache so the next invoke or scan is fresh.
      * The harness can optionally provide a callback to be notified.
+     *
+     * No hardcoded attributeFilter — filters in the callback so custom
+     * primitives from definePrimitive() and data-ax-* prefixes work
+     * automatically.
      * @param {((mutations: MutationRecord[]) => void) | undefined} [callback]
      * @returns {MutationObserver}
      */
     function watch(callback) {
         if (domWatcher) domWatcher.disconnect();
-        domWatcher = new MutationObserver((mutations) => {
+        domWatcher = new MutationObserver(function (mutations) {
+            let relevant = false;
+            let mi = 0;
+            const mlen = mutations.length;
+            for (; mi < mlen; mi++) {
+                if (isAXMutation(mutations[mi])) {
+                    relevant = true;
+                    break;
+                }
+            }
+            if (!relevant) return;
             lastScan = null;
             elementToId = new WeakMap();
-            callback?.(mutations);
+            if (callback) callback(mutations);
         });
         domWatcher.observe(document.documentElement, {
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: [
-                "ax-view",
-                "ax-edit",
-                "ax-click",
-                "ax-nav",
-                "ax-ctx",
-                "ax-ignore",
-                "ax-before-click",
-                "ax-on-click",
-                "ax-after-click",
-                "ax-before-view",
-                "ax-on-view",
-                "ax-after-view",
-                "ax-before-edit",
-                "ax-on-edit",
-                "ax-after-edit",
-                "ax-before-nav",
-                "ax-on-nav",
-                "ax-after-nav",
-                "ax-beforeclick",
-                "ax-onclick",
-                "ax-afterclick",
-                "ax-beforeview",
-                "ax-onview",
-                "ax-afterview",
-                "ax-beforeedit",
-                "ax-onedit",
-                "ax-afteredit",
-                "ax-beforenav",
-                "ax-onnav",
-                "ax-afternav",
-            ],
+            // No attributeFilter — we filter in the callback,
+            // so custom primitives and data-ax-* are covered.
         });
         return domWatcher;
     }

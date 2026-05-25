@@ -306,22 +306,93 @@ const r2 = ax.invoke(el, "click")
 
 ## 7) DOM Watch
 
-AX can observe DOM mutations and keep the scan cache invalidated so the client reads fresh state.
+AX can observe the DOM for mutations that affect annotated elements and keep the scan cache invalidated, so the client always reads fresh state.
 
 ```ts
 ax.watch(callback?): MutationObserver   // start observing
 ax.unwatch(): void                      // stop observing
 ```
 
-When a mutation is detected on any ax-related attribute or child list, the scan cache is cleared. The next `scan()` or `invoke()` call produces a fresh walk of the DOM.
+### Setup
 
-This enables flows like:
+```js
+import ax from "ax";
 
-1. Agent reads a cell: `ax-view="order status"` + `ax-click="editRow10234"`
-2. Agent invokes click → page swaps `<span>` for `<select ax-edit="order status">`
-3. Watch detects mutation → cache invalidated
-4. Agent rescans → sees the new edit capability
-5. Agent invokes edit → sets new value
+// Start watching — cache clears automatically when ax elements change
+ax.watch();
+
+// Or with a callback for notification
+ax.watch((mutations) => {
+    // ax cache already cleared — callback is informational
+    console.log("ax-relevant DOM mutation detected", mutations.length);
+});
+
+// Stop watching
+ax.unwatch();
+```
+
+### What the observer checks
+
+The observer runs a single `MutationObserver` on `document.documentElement` with `childList: true, subtree: true, attributes: true` and no `attributeFilter`. Instead, it filters relevant mutations in the callback — this is intentional.
+
+**For child list mutations** (elements added or removed), the callback walks the affected nodes one level deep checking for `ax-*` or `data-ax-*` attributes:
+
+- Added node with `ax-click` → cache invalidated
+- Added `<div>` (no ax attributes) → observer fires but ax skips it
+- Removed `<form ax-ctx="signup">` → cache invalidated (parent check, ax children caught below)
+- Added container with `<button ax-click="save">` as direct child → cache invalidated (one-level walk)
+- Deeply nested ax element inside non-ax wrappers → cache invalidated if a direct child of the added/removed root has ax attributes
+
+**For attribute mutations**, only `ax-*` and `data-ax-*` attribute names trigger invalidation. Framework-managed attributes (`class`, `style`, `aria-*`, `data-*` that don't start with `data-ax-`) are ignored.
+
+### What this means for frameworks
+
+Since there is no `attributeFilter`, the observer callback fires for *every* attribute change in the tree — including `class`, `style`, and any other DOM attribute managed by a reactive framework. The check inside the callback is a fast `startsWith("ax-") || startsWith("data-ax-")` test on the attribute name. Non-ax attribute changes return early without allocating or clearing cache.
+
+This means:
+- React/SolidJS class or style updates → observer callback fires → `isAXMutation` returns `false` → no cache invalidation
+- Svelte/ Vue `data-*` attribute changes → same — only `data-ax-*` prefixed ones matter
+- Custom primitives registered via `definePrimitive()` are automatically covered — no filter configuration needed
+
+### Cache invalidation
+
+When a relevant mutation is detected:
+
+1. `lastScan` is set to `null`
+2. `elementToId` (the element→id WeakMap) is replaced with a fresh WeakMap
+3. If a callback was provided, it receives the raw `MutationRecord[]` array
+
+The next `scan()` or `invoke()` call produces a fresh walk of the entire DOM.
+
+### Flow example
+
+```js
+// Page renders: <span ax-view="order status" ax-click="editRow10234"
+//                    ax-onClick="editRow10234">Shipped</span>
+
+ax.watch();
+let dag = ax.scan();
+// dag.nodes: [{ id: "...", fn: [{ on: "view" }, { on: "click" }] }]
+
+// Agent clicks — page swaps span for <select ax-edit="order status">
+ax.invoke(el, "click");
+
+// Observer fires: span removed (has ax-*), select added (has ax-edit)
+// Cache cleared automatically
+
+// Agent rescans — sees the edit capability
+dag = ax.scan();
+// dag.nodes: [{ id: "...", fn: [{ on: "edit", args: { "order status": "select?" } }] }]
+
+ax.invoke(selectEl, "edit", { value: "Processing" });
+```
+
+### Important notes
+
+- `watch()` creates a single `MutationObserver` that persists until `unwatch()` is called
+- Calling `watch()` multiple times disconnects the previous observer and creates a new one
+- The observer only cares about ax-relevant mutations — non-ax DOM changes are silently skipped
+- It does not matter who caused the mutation (framework, extension, inline script) — the same check applies
 
 ---
 
