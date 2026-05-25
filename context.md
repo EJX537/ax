@@ -15,6 +15,7 @@ Removed from core:
 - mutation smart-diff/cache invalidation machinery
 
 The source of truth is now:
-- `spec.md` (core requirements)
+- `docs/spec.md` (core specification)
 - `README.md` (developer-facing summary)
+- `.pi/agents.md` (guidelines for AI agents working on the codebase)
 - `src/index.js` (minimal runtime)
