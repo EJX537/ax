@@ -1,0 +1,74 @@
+{
+  "dag": {
+    "$root": [
+      "$1"
+    ],
+    "$1": [
+      "$order-row",
+      "$table-title"
+    ],
+    "$table-title": [],
+    "$order-row": [
+      "$order-status"
+    ],
+    "$order-status": []
+  },
+  "nodes": [
+    {
+      "id": "$root",
+      "parent": null,
+      "children": [
+        "$1"
+      ],
+      "fn": []
+    },
+    {
+      "id": "$1",
+      "parent": "$root",
+      "children": [
+        "$order-row",
+        "$table-title"
+      ],
+      "fn": []
+    },
+    {
+      "id": "$table-title",
+      "parent": "$1",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "table title"
+        }
+      ]
+    },
+    {
+      "id": "$order-row",
+      "parent": "$1",
+      "children": [
+        "$order-status"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "order row"
+        }
+      ]
+    },
+    {
+      "id": "$order-status",
+      "parent": "$order-row",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "order status"
+        },
+        {
+          "on": "click",
+          "name": "editRow10234"
+        }
+      ]
+    }
+  ]
+}

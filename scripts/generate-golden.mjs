@@ -18,6 +18,9 @@ const ASSETS_DIR = "tests/assets";
 
 const ASSETS = {
     "personal-info-form": "tests/assets/personal-info-form.html",
+    "search-results": "tests/assets/search-results.html",
+    "dashboard": "tests/assets/dashboard.html",
+    "inline-edit-table": "tests/assets/inline-edit-table.html",
 };
 
 // ── JSDOM / ax setup ────────────────────────────────────────
@@ -38,6 +41,10 @@ function setupDOM(htmlPath) {
     // Hoist page-level functions so ax eval hooks can resolve them
     const knownFns = [
         "validateForm", "submitRegistration", "handleSubmitResult", "getField",
+        "submitSearch",
+        "fetchLatestData", "formatCurrency", "normalizeTrend",
+        "applyDateFilter", "exportCSV", "checkQuota",
+        "editRow10234",
     ];
     const scriptSrc = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1];
     if (scriptSrc) {
@@ -111,7 +118,6 @@ function normalizeScan(scan, aliasMap) {
             if (f.args) entry.args = f.args;
             return entry;
         }),
-        ...(n.scope && n.scope !== "__root__" ? { scope: n.scope } : {}),
     }));
 
     return { dag, nodes };

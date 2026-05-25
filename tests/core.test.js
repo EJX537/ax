@@ -81,7 +81,7 @@ describe("ax core", () => {
 
     test("invoke evaluates on hook string (HTMX-style eval)", () => {
         document.body.innerHTML = `
-      <div ax-view="price" ax-on-view="ctx => ctx.args.value * 2">20</div>
+      <div ax-view="price" ax-onView="ctx => ctx.args.value * 2">20</div>
     `;
 
         const el = queryFirst("[ax-view]");
@@ -92,7 +92,7 @@ describe("ax core", () => {
 
     test("before hook can cancel invocation", () => {
         document.body.innerHTML = `
-      <button ax-click="save" ax-before-click="() => false">Save</button>
+      <button ax-click="save" ax-beforeClick="() => false">Save</button>
     `;
 
         let clicked = false;
@@ -184,7 +184,7 @@ describe("ax core", () => {
 
     test("config.allowEval = false prevents hook execution", () => {
         document.body.innerHTML = `
-      <div ax-view="data" ax-on-view="() => 'evaled'">skip</div>
+      <div ax-view="data" ax-onView="() => 'evaled'">skip</div>
     `;
 
         ax.config.allowEval = false;
@@ -215,7 +215,9 @@ describe("ax core", () => {
         expect(rootNode.children.length).toBe(1);
 
         // Child — the ax-click button
-        const childNode = s.nodes.find((n) => n.fn.some((f) => f.on === "click"));
+        const childNode = s.nodes.find((n) =>
+            n.fn.some((f) => f.on === "click"),
+        );
         expect(childNode).toBeTruthy();
         expect(childNode.parent).toBe(rootNode.id);
         expect(childNode.children.length).toBe(0);

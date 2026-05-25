@@ -1,0 +1,475 @@
+{
+  "dag": {
+    "$root": [
+      "$1"
+    ],
+    "$1": [
+      "$14",
+      "$refinement-panel",
+      "$results",
+      "$search-header"
+    ],
+    "$search-header": [
+      "$result-summary",
+      "$search-form"
+    ],
+    "$search-form": [
+      "$query",
+      "$run-search"
+    ],
+    "$query": [],
+    "$run-search": [],
+    "$result-summary": [],
+    "$refinement-panel": [
+      "$2",
+      "$3",
+      "$rating-filter",
+      "$sort"
+    ],
+    "$sort": [],
+    "$rating-filter": [],
+    "$2": [],
+    "$3": [],
+    "$results": [
+      "$4",
+      "$9",
+      "$result-item"
+    ],
+    "$result-item": [
+      "$add-to-compare",
+      "$price",
+      "$rating",
+      "$view-result"
+    ],
+    "$view-result": [],
+    "$price": [],
+    "$rating": [],
+    "$add-to-compare": [],
+    "$4": [
+      "$5",
+      "$6",
+      "$7",
+      "$8"
+    ],
+    "$5": [],
+    "$6": [],
+    "$7": [],
+    "$8": [],
+    "$9": [
+      "$10",
+      "$11",
+      "$12",
+      "$13"
+    ],
+    "$10": [],
+    "$11": [],
+    "$12": [],
+    "$13": [],
+    "$14": [
+      "$next-page",
+      "$page-info",
+      "$previous-page"
+    ],
+    "$previous-page": [],
+    "$page-info": [],
+    "$next-page": []
+  },
+  "nodes": [
+    {
+      "id": "$root",
+      "parent": null,
+      "children": [
+        "$1"
+      ],
+      "fn": []
+    },
+    {
+      "id": "$1",
+      "parent": "$root",
+      "children": [
+        "$14",
+        "$refinement-panel",
+        "$results",
+        "$search-header"
+      ],
+      "fn": []
+    },
+    {
+      "id": "$search-header",
+      "parent": "$1",
+      "children": [
+        "$result-summary",
+        "$search-form"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "search header"
+        }
+      ]
+    },
+    {
+      "id": "$search-form",
+      "parent": "$search-header",
+      "children": [
+        "$query",
+        "$run-search"
+      ],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "search form",
+          "args": {
+            "query": "search?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$query",
+      "parent": "$search-form",
+      "children": [],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "query",
+          "args": {
+            "query": "search?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$run-search",
+      "parent": "$search-form",
+      "children": [],
+      "fn": [
+        {
+          "on": "click",
+          "name": "run search"
+        }
+      ]
+    },
+    {
+      "id": "$result-summary",
+      "parent": "$search-header",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "result summary"
+        }
+      ]
+    },
+    {
+      "id": "$refinement-panel",
+      "parent": "$1",
+      "children": [
+        "$2",
+        "$3",
+        "$rating-filter",
+        "$sort"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "refinement panel"
+        }
+      ]
+    },
+    {
+      "id": "$sort",
+      "parent": "$refinement-panel",
+      "children": [],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "sort",
+          "args": {
+            "sort": "select?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$rating-filter",
+      "parent": "$refinement-panel",
+      "children": [],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "rating filter",
+          "args": {
+            "rating filter": "radio?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$2",
+      "parent": "$refinement-panel",
+      "children": [],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "rating filter",
+          "args": {
+            "rating filter": "radio?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$3",
+      "parent": "$refinement-panel",
+      "children": [],
+      "fn": [
+        {
+          "on": "edit",
+          "name": "rating filter",
+          "args": {
+            "rating filter": "radio?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "$results",
+      "parent": "$1",
+      "children": [
+        "$4",
+        "$9",
+        "$result-item"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "results"
+        }
+      ]
+    },
+    {
+      "id": "$result-item",
+      "parent": "$results",
+      "children": [
+        "$add-to-compare",
+        "$price",
+        "$rating",
+        "$view-result"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "result item"
+        }
+      ]
+    },
+    {
+      "id": "$view-result",
+      "parent": "$result-item",
+      "children": [],
+      "fn": [
+        {
+          "on": "nav",
+          "name": "view result"
+        }
+      ]
+    },
+    {
+      "id": "$price",
+      "parent": "$result-item",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "price"
+        }
+      ]
+    },
+    {
+      "id": "$rating",
+      "parent": "$result-item",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "rating"
+        }
+      ]
+    },
+    {
+      "id": "$add-to-compare",
+      "parent": "$result-item",
+      "children": [],
+      "fn": [
+        {
+          "on": "click",
+          "name": "add to compare"
+        }
+      ]
+    },
+    {
+      "id": "$4",
+      "parent": "$results",
+      "children": [
+        "$5",
+        "$6",
+        "$7",
+        "$8"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "result item"
+        }
+      ]
+    },
+    {
+      "id": "$5",
+      "parent": "$4",
+      "children": [],
+      "fn": [
+        {
+          "on": "nav",
+          "name": "view result"
+        }
+      ]
+    },
+    {
+      "id": "$6",
+      "parent": "$4",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "price"
+        }
+      ]
+    },
+    {
+      "id": "$7",
+      "parent": "$4",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "rating"
+        }
+      ]
+    },
+    {
+      "id": "$8",
+      "parent": "$4",
+      "children": [],
+      "fn": [
+        {
+          "on": "click",
+          "name": "add to compare"
+        }
+      ]
+    },
+    {
+      "id": "$9",
+      "parent": "$results",
+      "children": [
+        "$10",
+        "$11",
+        "$12",
+        "$13"
+      ],
+      "fn": [
+        {
+          "on": "view",
+          "name": "result item"
+        }
+      ]
+    },
+    {
+      "id": "$10",
+      "parent": "$9",
+      "children": [],
+      "fn": [
+        {
+          "on": "nav",
+          "name": "view result"
+        }
+      ]
+    },
+    {
+      "id": "$11",
+      "parent": "$9",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "price"
+        }
+      ]
+    },
+    {
+      "id": "$12",
+      "parent": "$9",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "rating"
+        }
+      ]
+    },
+    {
+      "id": "$13",
+      "parent": "$9",
+      "children": [],
+      "fn": [
+        {
+          "on": "click",
+          "name": "add to compare"
+        }
+      ]
+    },
+    {
+      "id": "$14",
+      "parent": "$1",
+      "children": [
+        "$next-page",
+        "$page-info",
+        "$previous-page"
+      ],
+      "fn": []
+    },
+    {
+      "id": "$previous-page",
+      "parent": "$14",
+      "children": [],
+      "fn": [
+        {
+          "on": "nav",
+          "name": "previous page"
+        }
+      ]
+    },
+    {
+      "id": "$page-info",
+      "parent": "$14",
+      "children": [],
+      "fn": [
+        {
+          "on": "view",
+          "name": "page info"
+        }
+      ]
+    },
+    {
+      "id": "$next-page",
+      "parent": "$14",
+      "children": [],
+      "fn": [
+        {
+          "on": "nav",
+          "name": "next page"
+        }
+      ]
+    }
+  ]
+}

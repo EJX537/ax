@@ -84,7 +84,6 @@
                             type="text"
                             required
                             placeholder="Jane"
-                            data-ax-validate="required"
                         />
                         <span class="field-error" id="firstNameError"
                             >First name is required</span
@@ -96,7 +95,6 @@
                             ax-edit="middle name"
                             type="text"
                             placeholder="M."
-                            data-ax-validate="none"
                         />
                     </label>
                     <label>
@@ -106,7 +104,6 @@
                             type="text"
                             required
                             placeholder="Doe"
-                            data-ax-validate="required"
                         />
                         <span class="field-error" id="lastNameError"
                             >Last name is required</span
@@ -124,7 +121,6 @@
                         type="email"
                         required
                         placeholder="jane@example.com"
-                        data-ax-validate="email"
                     />
                     <span class="field-error" id="emailError"
                         >Enter a valid email address</span
@@ -140,7 +136,6 @@
                         ax-edit="phone"
                         type="tel"
                         placeholder="+1 555 000 0000"
-                        data-ax-validate="phone"
                     />
                     <span class="field-error" id="phoneError"
                         >Enter a valid phone number (e.g. +1 555 000 0000)</span
@@ -152,11 +147,7 @@
             <div class="field-group">
                 <label>
                     Country <span style="color: #d32f2f">*</span>
-                    <select
-                        ax-edit="country"
-                        required
-                        data-ax-validate="required"
-                    >
+                    <select ax-edit="country" required>
                         <option value="">— Select —</option>
                         <option value="US">United States</option>
                         <option value="UK">United Kingdom</option>
@@ -187,7 +178,6 @@
                         required
                         minlength="8"
                         placeholder="At least 8 characters"
-                        data-ax-validate="password"
                     />
                 </label>
             </div>
@@ -199,7 +189,6 @@
                         type="password"
                         required
                         placeholder="Repeat password"
-                        data-ax-validate="confirm"
                     />
                     <span class="field-error" id="confirmError"
                         >Passwords do not match</span
@@ -220,9 +209,9 @@
             <!-- Submit button with hooks -->
             <button
                 ax-click="submit registration"
-                ax-before-click="(ctx) => validateForm(ctx.el.form)"
-                ax-on-click="(ctx) => submitRegistration(ctx.el.form)"
-                ax-after-click="(ctx) => handleSubmitResult(ctx)"
+                ax-beforeClick="validateForm"
+                ax-onClick="submitRegistration"
+                ax-afterClick="handleSubmitResult"
                 type="submit"
             >
                 Create account
@@ -277,10 +266,11 @@
 
             /**
              * Validate the entire form.
-             * Called by ax-before-click on the submit button.
+             * Called by ax-beforeClick on the submit button.
              * Returns true if valid, false to cancel submission.
              */
-            function validateForm(form) {
+            function validateForm(ctx) {
+                var form = ctx.el.form;
                 clearAllErrors(form);
                 var valid = true;
 
@@ -363,9 +353,10 @@
 
             /**
              * Submit the registration.
-             * Called by ax-on-click on the submit button.
+             * Called by ax-onClick on the submit button.
              */
-            function submitRegistration(form) {
+            function submitRegistration(ctx) {
+                var form = ctx.el.form;
                 var payload = {
                     firstName: getField(form, "first name").value.trim(),
                     middleName: getField(form, "middle name").value.trim(),
@@ -381,7 +372,7 @@
 
             /**
              * Handle after-submit result.
-             * Called by ax-after-click.
+             * Called by ax-afterClick.
              */
             function handleSubmitResult(ctx) {
                 if (ctx.canceled) return;

@@ -22,7 +22,7 @@
                     />
                     <button
                         ax-click="run search"
-                        ax-on-click="(ctx) => submitSearch(ctx.el.form)"
+                        ax-onClick="submitSearch"
                     >
                         Search
                     </button>
@@ -78,7 +78,7 @@
                         <a
                             ax-nav="view result"
                             href="/product/sony-wh1000xm5"
-                            ax-swap="page"
+                           
                         >
                             Sony WH-1000XM5 Wireless Noise Cancelling Headphones
                         </a>
@@ -93,7 +93,7 @@
                         <a
                             ax-nav="view result"
                             href="/product/bose-qc45"
-                            ax-swap="page"
+                           
                         >
                             Bose QuietComfort 45 Wireless Headphones
                         </a>
@@ -108,7 +108,7 @@
                         <a
                             ax-nav="view result"
                             href="/product/airpods-pro"
-                            ax-swap="page"
+                           
                         >
                             Apple AirPods Pro (2nd generation)
                         </a>
@@ -123,18 +123,57 @@
             <nav ax-ctx="pagination">
                 <a
                     ax-nav="previous page"
-                    ax-swap="region"
+                   
                     href="/search?q=wireless+headphones&page=1"
                     >← Previous</a
                 >
                 <span ax-view="page info">Page 2 / 48</span>
                 <a
                     ax-nav="next page"
-                    ax-swap="region"
+                   
                     href="/search?q=wireless+headphones&page=3"
                     >Next →</a
                 >
             </nav>
         </div>
+
+        <script>
+            /**
+             * Execute a search.
+             * Called by ax-onClick on the search button.
+             * Returns structured search results.
+             */
+            function submitSearch(ctx) {
+                var form = ctx.el.form;
+                var input = form.querySelector('[ax-edit="query"]');
+                var query = input ? input.value : "";
+                return {
+                    query: query,
+                    results: [
+                        {
+                            title: "Sony WH-1000XM5 Wireless Noise Cancelling Headphones",
+                            price: "$349.99",
+                            rating: "★★★★☆",
+                            reviews: 2341,
+                            url: "/product/sony-wh1000xm5",
+                        },
+                        {
+                            title: "Bose QuietComfort 45 Wireless Headphones",
+                            price: "$329.00",
+                            rating: "★★★★☆",
+                            reviews: 1892,
+                            url: "/product/bose-qc45",
+                        },
+                        {
+                            title: "Apple AirPods Pro (2nd generation)",
+                            price: "$249.99",
+                            rating: "★★★★★",
+                            reviews: 4102,
+                            url: "/product/airpods-pro",
+                        },
+                    ],
+                };
+            }
+        </script>
     </body>
 </html>

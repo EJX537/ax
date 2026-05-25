@@ -22,11 +22,16 @@ function loadAsset(assetPath) {
     globalThis.HTMLAnchorElement = dom.window.HTMLAnchorElement;
 
     const knownFns = [
-        "validateForm", "submitRegistration", "handleSubmitResult", "getField",
+        "validateForm",
+        "submitRegistration",
+        "handleSubmitResult",
+        "getField",
     ];
     const scriptSrc = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1];
     if (scriptSrc) {
-        try { dom.window.eval(scriptSrc); } catch {}
+        try {
+            dom.window.eval(scriptSrc);
+        } catch {}
         for (const name of knownFns) {
             const val = dom.window[name];
             if (typeof val === "function") globalThis[name] = val;
@@ -54,7 +59,10 @@ function normalizeDAG(scan, ref) {
     const refAliases = new Map(
         ref.nodes.map((n) => {
             // Create a fingerprint from fn entries
-            const sig = n.fn.map((f) => `${f.on}:${f.name}`).sort().join("|");
+            const sig = n.fn
+                .map((f) => `${f.on}:${f.name}`)
+                .sort()
+                .join("|");
             return [sig, n.id];
         }),
     );
@@ -62,7 +70,10 @@ function normalizeDAG(scan, ref) {
     /** @type {Map<string, string>} */
     const keyMap = new Map();
     for (const n of scan.nodes) {
-        const sig = n.fn.map((f) => `${f.on}:${f.name}`).sort().join("|");
+        const sig = n.fn
+            .map((f) => `${f.on}:${f.name}`)
+            .sort()
+            .join("|");
         const alias = refAliases.get(sig);
         if (alias) keyMap.set(n.id, alias);
         // For the root node with empty fn, use the root alias
@@ -87,7 +98,6 @@ function normalizeDAG(scan, ref) {
             if (f.args) entry.args = f.args;
             return entry;
         }),
-        ...(n.scope && n.scope !== "__root__" ? { scope: n.scope } : {}),
     }));
 
     // Map dag
@@ -156,25 +166,21 @@ describe("personal-info-form", () => {
         }
     });
 
-    test("scope is set on nodes under ax-ctx", () => {
+    test("ctx.scope is correct when invoking elements under ax-ctx", () => {
         loadAsset("tests/assets/personal-info-form.html");
-        const scan = ax.scan();
+        ax.scan();
 
-        // Nodes under signup scope
-        const signupNodes = scan.nodes.filter(
-            (n) => n.scope === "signup",
-        );
-        expect(signupNodes.length).toBeGreaterThan(0);
+        const scopes = [];
+        ax.defineExtension("scopeTracker", {
+            beforeAction(ctx) {
+                scopes.push(ctx.scope);
+            },
+        });
 
-        // Root and top-level error/success don't have scope
-        const noScopeNodes = scan.nodes.filter(
-            (n) => !n.scope || n.scope === "__root__",
-        );
-        const noScopeNames = noScopeNodes.flatMap((n) =>
-            n.fn.map((f) => f.name),
-        );
-        expect(noScopeNames).toContain("form error");
-        expect(noScopeNames).toContain("success message");
+        // Invoke the submit button inside the signup scope
+        ax.invoke($("[ax-click='submit registration']"), "click");
+
+        expect(scopes).toContain("signup");
     });
 
     test("ax-ignore subtree is absent from DAG", () => {
@@ -190,7 +196,10 @@ describe("personal-info-form", () => {
         loadAsset("tests/assets/personal-info-form.html");
         ax.scan();
 
-        const result = ax.invoke($("[ax-click='submit registration']"), "click");
+        const result = ax.invoke(
+            $("[ax-click='submit registration']"),
+            "click",
+        );
 
         expect(result.canceled).toBe(true);
         expect(result.ok).toBe(false);
@@ -201,12 +210,22 @@ describe("personal-info-form", () => {
         loadAsset("tests/assets/personal-info-form.html");
         ax.scan();
 
-        const firstName = /** @type {HTMLInputElement} */ ($("[ax-edit='first name']"));
-        const lastName = /** @type {HTMLInputElement} */ ($("[ax-edit='last name']"));
+        const firstName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='first name']")
+        );
+        const lastName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='last name']")
+        );
         const email = /** @type {HTMLInputElement} */ ($("[ax-edit='email']"));
-        const country = /** @type {HTMLSelectElement} */ ($("[ax-edit='country']"));
-        const password = /** @type {HTMLInputElement} */ ($("[ax-edit='password']"));
-        const confirmPw = /** @type {HTMLInputElement} */ ($("[ax-edit='confirm password']"));
+        const country = /** @type {HTMLSelectElement} */ (
+            $("[ax-edit='country']")
+        );
+        const password = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='password']")
+        );
+        const confirmPw = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='confirm password']")
+        );
 
         firstName.value = "Jane";
         lastName.value = "Doe";
@@ -215,7 +234,10 @@ describe("personal-info-form", () => {
         password.value = "secret123";
         confirmPw.value = "secret123";
 
-        const result = ax.invoke($("[ax-click='submit registration']"), "click");
+        const result = ax.invoke(
+            $("[ax-click='submit registration']"),
+            "click",
+        );
         expect(result.canceled).toBe(true);
         expect(result.ok).toBe(false);
     });
@@ -224,12 +246,22 @@ describe("personal-info-form", () => {
         loadAsset("tests/assets/personal-info-form.html");
         ax.scan();
 
-        const firstName = /** @type {HTMLInputElement} */ ($("[ax-edit='first name']"));
-        const lastName = /** @type {HTMLInputElement} */ ($("[ax-edit='last name']"));
+        const firstName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='first name']")
+        );
+        const lastName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='last name']")
+        );
         const email = /** @type {HTMLInputElement} */ ($("[ax-edit='email']"));
-        const country = /** @type {HTMLSelectElement} */ ($("[ax-edit='country']"));
-        const password = /** @type {HTMLInputElement} */ ($("[ax-edit='password']"));
-        const confirmPw = /** @type {HTMLInputElement} */ ($("[ax-edit='confirm password']"));
+        const country = /** @type {HTMLSelectElement} */ (
+            $("[ax-edit='country']")
+        );
+        const password = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='password']")
+        );
+        const confirmPw = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='confirm password']")
+        );
 
         firstName.value = "Jane";
         lastName.value = "Doe";
@@ -238,7 +270,10 @@ describe("personal-info-form", () => {
         password.value = "secret123";
         confirmPw.value = "different";
 
-        const result = ax.invoke($("[ax-click='submit registration']"), "click");
+        const result = ax.invoke(
+            $("[ax-click='submit registration']"),
+            "click",
+        );
         expect(result.canceled).toBe(true);
         expect(result.ok).toBe(false);
     });
@@ -247,15 +282,29 @@ describe("personal-info-form", () => {
         loadAsset("tests/assets/personal-info-form.html");
         ax.scan();
 
-        const firstName = /** @type {HTMLInputElement} */ ($("[ax-edit='first name']"));
-        const middleName = /** @type {HTMLInputElement} */ ($("[ax-edit='middle name']"));
-        const lastName = /** @type {HTMLInputElement} */ ($("[ax-edit='last name']"));
+        const firstName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='first name']")
+        );
+        const middleName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='middle name']")
+        );
+        const lastName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='last name']")
+        );
         const email = /** @type {HTMLInputElement} */ ($("[ax-edit='email']"));
         const phone = /** @type {HTMLInputElement} */ ($("[ax-edit='phone']"));
-        const country = /** @type {HTMLSelectElement} */ ($("[ax-edit='country']"));
-        const marketingConsent = /** @type {HTMLInputElement} */ ($("[ax-edit='marketing consent']"));
-        const password = /** @type {HTMLInputElement} */ ($("[ax-edit='password']"));
-        const confirmPw = /** @type {HTMLInputElement} */ ($("[ax-edit='confirm password']"));
+        const country = /** @type {HTMLSelectElement} */ (
+            $("[ax-edit='country']")
+        );
+        const marketingConsent = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='marketing consent']")
+        );
+        const password = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='password']")
+        );
+        const confirmPw = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='confirm password']")
+        );
 
         firstName.value = "Jane";
         middleName.value = "Marie";
@@ -267,7 +316,10 @@ describe("personal-info-form", () => {
         password.value = "secret123";
         confirmPw.value = "secret123";
 
-        const result = ax.invoke($("[ax-click='submit registration']"), "click");
+        const result = ax.invoke(
+            $("[ax-click='submit registration']"),
+            "click",
+        );
 
         expect(result.canceled).toBeFalsy();
         expect(result.ok).toBe(true);
@@ -293,12 +345,22 @@ describe("personal-info-form", () => {
             },
         });
 
-        const firstName = /** @type {HTMLInputElement} */ ($("[ax-edit='first name']"));
-        const lastName = /** @type {HTMLInputElement} */ ($("[ax-edit='last name']"));
+        const firstName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='first name']")
+        );
+        const lastName = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='last name']")
+        );
         const email = /** @type {HTMLInputElement} */ ($("[ax-edit='email']"));
-        const country = /** @type {HTMLSelectElement} */ ($("[ax-edit='country']"));
-        const password = /** @type {HTMLInputElement} */ ($("[ax-edit='password']"));
-        const confirmPw = /** @type {HTMLInputElement} */ ($("[ax-edit='confirm password']"));
+        const country = /** @type {HTMLSelectElement} */ (
+            $("[ax-edit='country']")
+        );
+        const password = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='password']")
+        );
+        const confirmPw = /** @type {HTMLInputElement} */ (
+            $("[ax-edit='confirm password']")
+        );
 
         firstName.value = "Jane";
         lastName.value = "Doe";
@@ -320,12 +382,21 @@ describe("personal-info-form", () => {
         /** @type {string[]} */
         const phases = [];
         ax.defineExtension("cancelTracker", {
-            beforeAction(ctx) { phases.push(`before:${ctx.action}`); },
-            onAction(ctx) { phases.push(`on:${ctx.action}`); },
-            afterAction(ctx) { phases.push(`after:${ctx.action}`); },
+            beforeAction(ctx) {
+                phases.push(`before:${ctx.action}`);
+            },
+            onAction(ctx) {
+                phases.push(`on:${ctx.action}`);
+            },
+            afterAction(ctx) {
+                phases.push(`after:${ctx.action}`);
+            },
         });
 
-        const result = ax.invoke($("[ax-click='submit registration']"), "click");
+        const result = ax.invoke(
+            $("[ax-click='submit registration']"),
+            "click",
+        );
         expect(result.canceled).toBe(true);
 
         expect(phases).toContain("before:click");

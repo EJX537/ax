@@ -10,8 +10,8 @@ AX is not an agent runtime. It does not make decisions. It compiles annotated DO
 
 ## 1) Core Goals
 
-1. **DOM Contract**: `ax-*` attributes are the source of truth
-2. **Element-Centric Compilation**: one element with multiple capabilities, not one node per primitive
+1. **DOM Contract**: `ax-*` (and `data-ax-*`) attributes are the source of truth
+2. **Element-Centric Compilation**: one element → one node with an array of function descriptors (`fn`), not one node per primitive
 3. **Promise-Based Hooks**: `ax-on*` is the page promising behavior; AX evaluates it (HTMX-style eval) when the client invokes
 4. **Action Lifecycle**: before / on / after phases around capabilities
 5. **Extensions as First-Class Citizens**
@@ -25,7 +25,7 @@ AX is not an agent runtime. It does not make decisions. It compiles annotated DO
 |---|---|---|
 | view | `ax-view` | readable content |
 | click | `ax-click` | triggerable action |
-| edit | `ax-edit` | writable field/action |
+| edit | `ax-edit` | writable field — args derived from native HTML |
 | nav | `ax-nav` | navigation action |
 
 Control attributes:
@@ -48,6 +48,17 @@ Each capability attribute must have a non-empty name.
 <button ax-click>Save</button>
 ```
 
+### Attribute Naming
+
+All `ax-*` attributes also accept the `data-ax-*` prefix. Hook attributes use camelCase after the phase word:
+
+| Form | Example |
+|---|---|
+| `ax-*` | `ax-onClick` |
+| `data-ax-*` | `data-ax-onClick` |
+
+Dash-separated hook forms (`ax-on-click`, `ax-before-view`) are not supported.
+
 ### Scoping
 
 - `<html>` is the implicit root scope
@@ -61,11 +72,10 @@ Each capability attribute must have a non-empty name.
 
 ### Scan Contract
 
-`ax.scan(root?)` walks the DOM and returns a scope-indexed snapshot.
+`ax.scan(root?)` walks the DOM and returns a fresh DAG snapshot. The root defaults to `document.documentElement` if omitted.
 
-- No parentId / childIds in the output
-- No smart-diff requirement
-- Fresh rebuild on each call
+- Fresh rebuild on every call — no smart-diff caching in core
+- Element IDs use `el.id` if present, otherwise AX generates ephemeral fallback IDs
 
 ### Output Shape
 
@@ -73,151 +83,180 @@ Each capability attribute must have a non-empty name.
 type AxScan = {
   version: number
   generatedAt: number
-  /** Scope index. "<html>" is the implicit root. */
-  contexts: Record<string, AxContext>
-}
-
-type AxContext = {
-  name: string
+  /** Adjacency map: node id → child node id[] */
+  dag: Record<string, string[]>
+  /** Serialized node data */
   nodes: AxNode[]
 }
 
 type AxNode = {
-  /** Identity — uses el.id if present, otherwise AX assigns an ephemeral key for the snapshot lifetime. No strict id contract. */
-  key: string
-  /** Runtime pointer. Non-serializable. */
-  el: Element
-  tag: string
-  /** ax-* attributes present on the element (all, for client inspection) */
-  attrs: Record<string, string>
-  /** Capabilities this element exposes (one entry per ax-* primitive present) */
-  capabilities: Record<string, AxCapability>
+  /** Node identifier — uses el.id if available, otherwise ephemeral */
+  id: string
+  /** Parent node id, or null for root */
+  parent: string | null
+  /** Child node ids */
+  children: string[]
+  /** Function descriptors for this element's capabilities */
+  fn: AxFnEntry[]
 }
 
-type AxCapability = {
-  kind: "view" | "click" | "edit" | "nav" | string
+type AxFnEntry = {
+  /** Capability kind: "view" | "click" | "edit" | "nav" | string */
+  on: string
+  /** Human label from the attribute value */
   name: string
-  href?: string      // nav only
-  inputType?: string // edit only
-  text?: string      // view / click / nav
-  value?: string | boolean  // edit only
-  hooks: {
-    before?: string  // raw eval string
-    on?: string      // raw eval string
-    after?: string   // raw eval string
-  }
+  /** Schema derived from native HTML (edit only) */
+  args?: Record<string, string>
 }
 ```
 
 ### Element-Centric, Not Primitive-Centric
 
-A single element with both `ax-view` and `ax-click` produces one node with two capabilities:
+A single element with both `ax-view` and `ax-click` produces one node with two fn entries:
 
 ```html
-<div ax-view="price" ax-onView="() => item.price" ax-click="buy Widget">Widget</div>
+<div ax-view="price" ax-click="buy Widget">Widget</div>
 ```
 
 Compiles to:
 
 ```json
 {
-  "key": "price-card",
-  "el": ...,
-  "tag": "div",
-  "attrs": {
-    "ax-view": "price",
-    "ax-onView": "() => item.price",
-    "ax-click": "buy Widget"
-  },
-  "capabilities": {
-    "view": {
-      "kind": "view",
-      "name": "price",
-      "text": "Widget",
-      "hooks": { "on": "() => item.price" }
-    },
-    "click": {
-      "kind": "click",
-      "name": "buy Widget",
-      "text": "Widget",
-      "hooks": {}
-    }
-  }
+  "id": "price-card",
+  "parent": null,
+  "children": [],
+  "fn": [
+    { "on": "view", "name": "price" },
+    { "on": "click", "name": "buy Widget" }
+  ]
 }
 ```
 
 The client reads the same element differently depending on interaction mode:
 
-- **Read mode**: use `capabilities.view` to get content name + hook promise
-- **Act mode**: use `capabilities.click` to invoke the action
+- **Read mode**: find `{ on: "view" }` in `fn`
+- **Act mode**: find `{ on: "click" }` in `fn`
+
+### Edit Args (Derived from Native HTML)
+
+For `ax-edit`, AX derives an args schema from native HTML attributes, not custom `data-ax-*` equivalents.
+
+| Native attribute | Result |
+|---|---|
+| `type="text"`, no `required` | `"text?"` |
+| `type="text"`, `required` | `"text"` |
+| `type="email"`, `required` | `"email"` |
+| `type="tel"`, no `required` | `"tel?"` |
+| `type="checkbox"`, no `required` | `"checkbox?"` |
+| `type="radio"`, no `required` | `"radio?"` |
+| `type="password"`, `required` | `"password"` |
+| `type="date"`, no `required` | `"date?"` |
+| `<select>`, no `required` | `"select?"` |
+
+The `?` suffix marks the field as optional (absent `required` attribute). Aggregate edit schemas on container elements (form, div) collect their descendants' field schemas.
 
 ---
 
 ## 4) Hook Lifecycle (HTMX-style eval)
 
-`ax-on*` attributes are the **page's promise** to the client. When invoked, AX evaluates them using HTMX-style eval (controlled by `ax.config.allowEval`, defaults to `true`).
+`ax-on*` attributes are the **page's promise** to the client. When invoked, AX evaluates them using HTMX-style eval (controlled by `ax.config.allowEval`, defaults to `false`).
 
 ### Hook Attribute Mapping
 
-| Short attribute | Maps to capability hook |
-|---|---|
-| `ax-on-view` | view.on |
-| `ax-before-view` | view.before |
-| `ax-after-view` | view.after |
-| `ax-on-click` | click.on |
-| `ax-before-click` | click.before |
-| `ax-after-click` | click.after |
-| `ax-on-edit` | edit.on |
-| `ax-before-edit` | edit.before |
-| `ax-after-edit` | edit.after |
-| `ax-on-nav` | nav.on |
-| `ax-before-nav` | nav.before |
-| `ax-after-nav` | nav.after |
+| Attribute | Phase | Applies to |
+|---|---|---|
+| `ax-beforeClick` / `data-ax-beforeClick` | before | click |
+| `ax-onClick` / `data-ax-onClick` | on | click |
+| `ax-afterClick` / `data-ax-afterClick` | after | click |
+| `ax-beforeView` / `data-ax-beforeView` | before | view |
+| `ax-onView` / `data-ax-onView` | on | view |
+| `ax-afterView` / `data-ax-afterView` | after | view |
+| `ax-beforeEdit` / `data-ax-beforeEdit` | before | edit |
+| `ax-onEdit` / `data-ax-onEdit` | on | edit |
+| `ax-afterEdit` / `data-ax-afterEdit` | after | edit |
+| `ax-beforeNav` / `data-ax-beforeNav` | before | nav |
+| `ax-onNav` / `data-ax-onNav` | on | nav |
+| `ax-afterNav` / `data-ax-afterNav` | after | nav |
 
-(Kebab-cased attribute names. Must be on the same element as the corresponding primitive.)
+Attributes must be on the same element as the corresponding primitive.
+
+### Hook Evaluation
+
+The attribute value is a JavaScript expression wrapped and called with `ctx`:
+
+```js
+new Function("ctx", `return (${raw})(ctx);`)
+```
+
+This accepts both function names and inline lambdas:
+
+```html
+<!-- Named function -->
+<button ax-click="save" ax-onClick="submitForm">Save</button>
+
+<!-- Inline lambda -->
+<button ax-click="save" ax-onClick="(ctx) => submitForm(ctx.el.form)">Save</button>
+```
 
 ### Hook Execution Order
 
 ```
-before hook   →   (cancel early if false returned)
-on hook       →   (primary behavior)
-after hook    →   (post-processing)
+extension.beforeAction  →  before hook  →  on hook  →  after hook  →  extension.afterAction
 ```
 
-- `before` — guard/cancel/inspect. If returns `false` or throws `CancelError`, the chain stops.
-- `on` — primary action implementation. The value it returns becomes the result.
-- `after` — post-action. Result is the `on` return value (or `undefined` if cancelled).
+- **extension.beforeAction** — first to fire, can cancel via `ctx.canceled = true`
+- **before** — guard/cancel. If returns `false`, the chain stops.
+- **on** — primary action. Return value becomes `result` in invoke response.
+- **after** — post-processing, return value ignored.
+- **extension.afterAction** — last to fire.
 
-### Eval Context
-
-Each hook function receives:
+### Eval Context (`AxInvokeContext`)
 
 ```ts
-{ el, action: string, args: any, scope: string, ax: AxAPI }
+{
+  phase: "before" | "on" | "after",
+  action: string,
+  scope: string,
+  el: Element,
+  args: any,
+  scan: AxScan | null,
+  fnEntry: AxFnEntry | undefined,
+  hooks: { before?: string, on?: string, after?: string },
+  canceled: boolean,
+  result: any,
+  error?: string
+}
 ```
 
-Example:
+### Error Propagation
 
-```html
-<div ax-view="price" ax-on-view="(ctx) => ctx.args.item.price"></div>
-```
-
-When client calls `ax.invoke(el, "view", { item })`, the `on` hook evaluates to `item.price`.
+- If a before hook sets `ctx.canceled = true` and `ctx.error = "reason"`, the invoke result includes `{ canceled: true, error: "reason" }`
+- If a hook evaluation throws, the error is caught and stored in `ctx.error`
+- The error flows through to the invoke result
 
 ### allowEval Control
 
 ```ts
-// default: true (HTMX-like)
-ax.config = { allowEval: true }
-
-// When false, inline hook strings throw or are silently skipped
+ax.config.allowEval = true   // enable hook evaluation (HTMX-like)
+ax.config.allowEval = false  // hooks silently return undefined (default)
 ```
 
 ---
 
-## 5) Invoke Contract
+## 5) Default Behaviors (No on-hook)
 
-The primary runtime interaction API.
+When no `ax-on*` hook is present, AX provides sensible defaults:
+
+| Capability | Default behavior |
+|---|---|
+| view | `el.textContent?.trim() ?? ""` |
+| click | `el.click()` (native DOM click) |
+| edit | Sets `el.value` (or `.checked` for checkbox/radio) |
+| nav | Returns `el.href` for anchor elements, otherwise `el.click()` |
+
+---
+
+## 6) Invoke Contract
 
 ### Signature
 
@@ -227,32 +266,15 @@ ax.invoke(scope?, el, action, args?): AxInvokeResult
 
 | Parameter | Required | Description |
 |---|---|---|
-| `scope` | no | Scope name (string) or element. Defaults to global root context. |
+| `scope` | no | Scope name or element. When omitted, inferred from element position. |
 | `el` | yes | The target Element |
-| `action` | yes | Capability name: `"view"` | `"click"` | `"edit"` | `"nav"` | custom |
+| `action` | yes | Capability: `"view"` | `"click"` | `"edit"` | `"nav"` | custom |
 | `args` | no | Payload object passed to hook evaluation context |
 
-### Behavior
+### Overload resolution
 
-1. **Resolve scope**:
-   - Omitted → global root (`<html>` context)
-   - Provided → validate element belongs to that scope
-
-2. **Validate**:
-   - Element is not under `ax-ignore`
-   - Element has the requested capability
-
-3. **Run lifecycle**:
-
-```
-1. Run extension.beforeAction(ctx)
-2. Run ax-before-<action> hook on element
-3. Run ax-on-<action> hook on element
-4. Run ax-after-<action> hook on element
-5. Run extension.afterAction(ctx)
-```
-
-Each step can cancel by returning `false` or throwing.
+- `invoke(el, "click")` — element + action (3 args or fewer)
+- `invoke("scope", el, "click")` — explicit scope + element + action (4 args)
 
 ### Return Shape
 
@@ -261,7 +283,7 @@ type AxInvokeResult = {
   ok: boolean
   canceled?: boolean    // true if a before hook cancelled
   result?: any          // return value of the on hook
-  error?: string        // error message if hook threw
+  error?: string        // error message if a hook threw or was cancelled with reason
 }
 ```
 
@@ -270,40 +292,40 @@ type AxInvokeResult = {
 ```js
 // Read a view capability
 const r1 = ax.invoke(el, "view", { item })
-// → { ok: true, result: 29.99 }
+// → { ok: true, result: "29.99" }
 
 // Trigger a click
-const r2 = ax.invoke(el, "click", { item })
-// → { ok: true, result: "bought Widget" }
+const r2 = ax.invoke(el, "click")
+// → { ok: true }
 
-// Scope-aware
-const r3 = ax.invoke("sidebar", el, "nav", {})
-// → { ok: true, result: "/next" }
+// Validation cancels with reason
+// → { ok: false, canceled: true, error: "email is required" }
 ```
 
 ---
 
-## 6) Invocation without eval (dry contract)
+## 7) DOM Watch
 
-If a page has `ax-view="price"` but no `ax-on-view` hook, invocation returns the element state directly:
+AX can observe DOM mutations and keep the scan cache invalidated so the client reads fresh state.
 
-```js
-ax.invoke(el, "view", {})
-// → { ok: true, result: el.textContent?.trim() ?? "" }
+```ts
+ax.watch(callback?): MutationObserver   // start observing
+ax.unwatch(): void                      // stop observing
 ```
 
-AX provides sensible default behavior for each capability when no `on` hook is defined:
+When a mutation is detected on any ax-related attribute or child list, the scan cache is cleared. The next `scan()` or `invoke()` call produces a fresh walk of the DOM.
 
-| Capability | Default |
-|---|---|
-| view | `el.textContent?.trim()` |
-| click | `el.click()` (native DOM) |
-| edit | `el.value` (or `.checked` for checkbox/radio) |
-| nav | `el.href` or `el.click()` |
+This enables flows like:
+
+1. Agent reads a cell: `ax-view="order status"` + `ax-click="editRow10234"`
+2. Agent invokes click → page swaps `<span>` for `<select ax-edit="order status">`
+3. Watch detects mutation → cache invalidated
+4. Agent rescans → sees the new edit capability
+5. Agent invokes edit → sets new value
 
 ---
 
-## 7) Extensions (Core)
+## 8) Extensions (Core)
 
 Extensions are first-class. They participate in both scan and invoke phases.
 
@@ -311,39 +333,37 @@ Extensions are first-class. They participate in both scan and invoke phases.
 
 ```ts
 ax.defineExtension("name", {
-  init(api) { ... }
-  onScanStart(ctx) { ... }
-  onNode(ctx) { ... }
-  onScanEnd(ctx) { ... }
-  beforeAction(ctx) { ... }
-  afterAction(ctx) { ... }
-  onInvoke(ctx) { ... }      // replaces default on-hook behavior
+  init(api) { ... }                             // receives { definePrimitive, getScan }
+  onScanStart(ctx)    { ... }                   // root element, partial scan
+  onNode(ctx)         { ... }                   // per-node during walk
+  onScanEnd(ctx)      { ... }                   // complete scan
+  beforeAction(ctx)   { ... }                   // before hook phase
+  onInvoke(ctx)       { ... }                   // replaces default on-hook behavior
+  afterAction(ctx)    { ... }                   // after hook phase
 })
 ax.removeExtension("name")
-ax.definePrimitive(attr, def) // register custom ax-* attribute
+ax.definePrimitive(attr, def)  // register custom ax-* attribute
+```
+
+### Custom Primitives
+
+Extensions can define new `ax-*` attributes:
+
+```ts
+ax.definePrimitive("ax-rate", { kind: "ext:rating" });
+// Now <div ax-rate="thumbs up"> is a valid capability node
+// with fn: [{ on: "ext:rating", name: "thumbs up" }]
 ```
 
 ---
 
-## 8) ax.config
+## 9) ax.config
 
 ```ts
 ax.config = {
-  allowEval: true   // HTMX-style inline function evaluation
+  allowEval: false   // HTMX-style inline function evaluation
 }
 ```
-
----
-
-## 9) Explicit Non-Core Features
-
-The following belong in extensions or harnesses, not AX core:
-
-1. Template pipeline / transform DAG
-2. `ax-for` routing
-3. Built-in status inference engine
-4. Smart DOM diff / patch protocol
-5. Strict id semantics for serialization
 
 ---
 
@@ -353,6 +373,8 @@ The following belong in extensions or harnesses, not AX core:
 scan(root?: Element): AxScan
 process(root?: Element): AxScan
 invoke(scope?, el, action, args?): AxInvokeResult
+watch(callback?): MutationObserver
+unwatch(): void
 
 defineExtension(name, ext): void
 removeExtension(name): void
@@ -366,3 +388,5 @@ config: { allowEval: boolean }
 ## 11) Design Principle
 
 If a feature does more than express/compile the DOM contract or execute lifecycle hooks the page promises, it belongs in extensions or the harness — not AX core.
+
+No AX-* attribute should duplicate information already available from native HTML. The DOM is the contract — `required`, `type`, `minlength`, and other native attributes speak for themselves.

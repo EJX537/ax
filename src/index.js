@@ -49,7 +49,6 @@
  * @property {string | null} parent
  * @property {string[]} children
  * @property {AxFnEntry[]} fn
- * @property {string | undefined} scope
  */
 
 /**
@@ -117,6 +116,12 @@ let lastScan = null;
 /** @type {WeakMap<Element, string>} */
 let elementToId = new WeakMap();
 
+/** @type {WeakMap<Element, string>} */
+let elementToScope = new WeakMap();
+
+/** @type {MutationObserver | null} */
+let domWatcher = null;
+
 let version = 0;
 
 /** @type {AxConfig} */
@@ -139,7 +144,9 @@ const config = axConfig;
 function getOrAssignId(el, seenIds) {
     if (el.id) {
         if (seenIds.has(el.id)) {
-            console.warn(`ax: duplicate id "${el.id}" on <${el.tagName.toLowerCase()}>, generating fallback`);
+            console.warn(
+                `ax: duplicate id "${el.id}" on <${el.tagName.toLowerCase()}>, generating fallback`,
+            );
             const id = `ax-${version}-${Math.random().toString(36).slice(2, 8)}`;
             elementToId.set(el, id);
             return id;
@@ -235,14 +242,23 @@ function inferInputType(el) {
 function readHooks(attrs, kind) {
     /** @type {AxHookSet} */
     const hooks = {};
+    const suffix = kind.charAt(0).toUpperCase() + kind.slice(1);
     const on =
-        attrs[`ax-on-${kind}`] ||
-        attrs[`ax-on${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
+        attrs[`ax-on${suffix}`] ||
+        attrs[`data-ax-on${suffix}`] ||
+        attrs[`ax-on${kind}`] ||
+        attrs[`data-ax-on${kind}`];
     const before =
-        attrs[`ax-before-${kind}`] ||
-        attrs[`ax-before${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
+        attrs[`ax-before${suffix}`] ||
+        attrs[`data-ax-before${suffix}`] ||
+        attrs[`ax-before${kind}`] ||
+        attrs[`data-ax-before${kind}`];
     const after =
-        attrs[`ax-after-${kind}`] ||
+        attrs[`ax-after${suffix}`] ||
+        attrs[`data-ax-after${suffix}`] ||
+        attrs[`ax-after${kind}`] ||
+        attrs[`data-ax-after${kind}`];
+    attrs[`ax-after-${kind}`] ||
         attrs[`ax-after${kind.charAt(0).toUpperCase() + kind.slice(1)}`];
     if (before) hooks.before = before;
     if (on) hooks.on = on;
@@ -307,7 +323,9 @@ function collectEditArgs(node) {
      */
     function walkNode(n) {
         /** @type {AxFnEntry | undefined} */
-        const editFn = n.fn.find(/** @param {AxFnEntry} f */ (f) => f.on === "edit");
+        const editFn = n.fn.find(
+            /** @param {AxFnEntry} f */ (f) => f.on === "edit",
+        );
         if (editFn && editFn.args) {
             Object.assign(merged, editFn.args);
             count += Object.keys(editFn.args).length;
@@ -424,6 +442,7 @@ function scan(root) {
                 scope: elScope,
                 attrs,
             };
+            elementToScope.set(el, elScope);
 
             // Link to parent
             if (parent) {
@@ -439,12 +458,15 @@ function scan(root) {
                 parent: node._parent ? node._parent.id : null,
                 children: [],
                 fn: node.fn,
-                scope: node.scope,
             };
             buildScan.nodes.push(serializedNode);
             buildScan.dag[node.id] = [];
             for (const ext of extensions.values()) {
-                ext.onNode?.({ node: serializedNode, element: el, scan: buildScan });
+                ext.onNode?.({
+                    node: serializedNode,
+                    element: el,
+                    scan: buildScan,
+                });
             }
             // Change parent for descendants — new scope depth starts here
             parent = node;
@@ -603,11 +625,8 @@ function invoke(scopeOrEl, elOrAction, actionOrArgs, args) {
         return invokeDefault(el, action, payloadArgs);
     }
 
-    // Resolve scope from the node's tree position
-    let resolvedScope = scope || "__root__";
-    if (nodeEntry && nodeEntry.scope) {
-        resolvedScope = nodeEntry.scope;
-    }
+    // Resolve scope from the element's node position
+    let resolvedScope = scope || elementToScope.get(el) || "__root__";
 
     // Read hooks from the element's attrs for this action
     const attrs = readAXAttrs(el);
@@ -632,12 +651,22 @@ function invoke(scopeOrEl, elOrAction, actionOrArgs, args) {
         ext.beforeAction?.(ctx);
     }
     if (ctx.canceled) {
-        return { ok: false, canceled: true, result: undefined, ...(ctx.error ? { error: ctx.error } : {}) };
+        return {
+            ok: false,
+            canceled: true,
+            result: undefined,
+            ...(ctx.error ? { error: ctx.error } : {}),
+        };
     }
 
     const beforeResult = executeHook("before", hooks.before, ctx);
     if (beforeResult !== undefined && beforeResult === false) {
-        return { ok: false, canceled: true, result: undefined, ...(ctx.error ? { error: ctx.error } : {}) };
+        return {
+            ok: false,
+            canceled: true,
+            result: undefined,
+            ...(ctx.error ? { error: ctx.error } : {}),
+        };
     }
 
     // ── On lifecycle ──
@@ -794,6 +823,70 @@ function removeExtension(name) {
     extensions.delete(name);
 }
 
+/**
+ * Start watching the DOM for mutations that affect ax elements.
+ * Invalidates the scan cache so the next invoke or scan is fresh.
+ * The harness can optionally provide a callback to be notified.
+ * @param {((mutations: MutationRecord[]) => void) | undefined} [callback]
+ * @returns {MutationObserver}
+ */
+function watch(callback) {
+    if (domWatcher) domWatcher.disconnect();
+    domWatcher = new MutationObserver((mutations) => {
+        lastScan = null;
+        elementToId = new WeakMap();
+        callback?.(mutations);
+    });
+    domWatcher.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+            "ax-view",
+            "ax-edit",
+            "ax-click",
+            "ax-nav",
+            "ax-ctx",
+            "ax-ignore",
+            "ax-before-click",
+            "ax-on-click",
+            "ax-after-click",
+            "ax-before-view",
+            "ax-on-view",
+            "ax-after-view",
+            "ax-before-edit",
+            "ax-on-edit",
+            "ax-after-edit",
+            "ax-before-nav",
+            "ax-on-nav",
+            "ax-after-nav",
+            "ax-beforeclick",
+            "ax-onclick",
+            "ax-afterclick",
+            "ax-beforeview",
+            "ax-onview",
+            "ax-afterview",
+            "ax-beforeedit",
+            "ax-onedit",
+            "ax-afteredit",
+            "ax-beforenav",
+            "ax-onnav",
+            "ax-afternav",
+        ],
+    });
+    return domWatcher;
+}
+
+/**
+ * Stop watching for DOM mutations.
+ */
+function unwatch() {
+    if (domWatcher) {
+        domWatcher.disconnect();
+        domWatcher = null;
+    }
+}
+
 const publicAPI = {
     scan,
     process,
@@ -801,6 +894,8 @@ const publicAPI = {
     definePrimitive,
     defineExtension,
     removeExtension,
+    watch,
+    unwatch,
     config: axConfig,
 };
 

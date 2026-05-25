@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Inline Edit Table</title>
+        <script src="../../dist/ax.js"></script>
+        <style>
+            .edit-cell { cursor: pointer; }
+            .edit-cell:hover { background: #f0f0f0; }
+        </style>
+    </head>
+    <body>
+        <!--
+    User flow: view order status, click to edit, edit value
+    Annotations demonstrate: view + click on same element, DOM mutation via click handler,
+    rescan after mutation reveals edit capability.
+    -->
+
+        <div ax-ctx="orders">
+            <h2 ax-view="table title">Recent Orders</h2>
+            <table ax-ctx="order:10234" ax-view="order row">
+                <tr>
+                    <td>#10234</td>
+                    <td>Alice Chen</td>
+                    <td id="statusCell10234">
+                        <span
+                            ax-view="order status"
+                            ax-click="editRow10234"
+                            ax-onClick="editRow10234"
+                            class="edit-cell"
+                        >Shipped</span>
+                    </td>
+                    <td>$129.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <script>
+            /**
+             * Toggle a table cell between display (span) and edit (select) mode.
+             * Called by ax-onClick on the status cell.
+             */
+            function editRow10234(ctx) {
+                var cell = document.getElementById("statusCell10234");
+                var current = cell.querySelector("span, select");
+
+                if (current && current.tagName === "SPAN") {
+                    // Swap span → select
+                    var select = document.createElement("select");
+                    select.setAttribute("ax-edit", "order status");
+                    var options = ["Shipped", "Processing", "Pending", "Cancelled"];
+                    for (var i = 0; i < options.length; i++) {
+                        var opt = document.createElement("option");
+                        opt.value = options[i];
+                        opt.textContent = options[i];
+                        if (options[i] === current.textContent.trim()) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    }
+                    cell.replaceChild(select, current);
+                } else if (current && current.tagName === "SELECT") {
+                    // Swap select → span (commit the edit)
+                    var span = document.createElement("span");
+                    span.setAttribute("ax-view", "order status");
+                    span.setAttribute("ax-click", "edit row 10234");
+                    span.className = "edit-cell";
+                    span.textContent = current.value;
+                    cell.replaceChild(span, current);
+                }
+            }
+        </script>
+    </body>
+</html>

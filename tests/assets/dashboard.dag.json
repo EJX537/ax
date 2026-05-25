@@ -1,0 +1,395 @@
+{
+    "dag": {
+        "$root": ["$1"],
+        "$1": [
+            "$11",
+            "$dashboard-header",
+            "$data-table-section",
+            "$metrics-row"
+        ],
+        "$dashboard-header": ["$last-updated", "$refresh-all"],
+        "$last-updated": [],
+        "$refresh-all": [],
+        "$metrics-row": ["$2", "$5", "$8", "$metric-card"],
+        "$metric-card": ["$metric-trend", "$metric-value"],
+        "$metric-value": [],
+        "$metric-trend": [],
+        "$2": ["$3", "$4"],
+        "$3": [],
+        "$4": [],
+        "$5": ["$6", "$7"],
+        "$6": [],
+        "$7": [],
+        "$8": ["$10", "$9"],
+        "$9": [],
+        "$10": [],
+        "$11": ["$apply-date-filter", "$date-from", "$date-to"],
+        "$date-from": [],
+        "$date-to": [],
+        "$apply-date-filter": [],
+        "$data-table-section": [
+            "$export-to-csv",
+            "$export-to-pdf",
+            "$order-table"
+        ],
+        "$order-table": ["$12", "$order-row"],
+        "$order-row": ["$order-status", "$view-order"],
+        "$order-status": [],
+        "$view-order": [],
+        "$12": ["$13", "$14"],
+        "$13": [],
+        "$14": [],
+        "$export-to-csv": [],
+        "$export-to-pdf": []
+    },
+    "nodes": [
+        {
+            "id": "$root",
+            "parent": null,
+            "children": ["$1"],
+            "fn": []
+        },
+        {
+            "id": "$1",
+            "parent": "$root",
+            "children": [
+                "$11",
+                "$dashboard-header",
+                "$data-table-section",
+                "$metrics-row"
+            ],
+            "fn": []
+        },
+        {
+            "id": "$dashboard-header",
+            "parent": "$1",
+            "children": ["$last-updated", "$refresh-all"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "dashboard header"
+                }
+            ]
+        },
+        {
+            "id": "$last-updated",
+            "parent": "$dashboard-header",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "last updated"
+                }
+            ]
+        },
+        {
+            "id": "$refresh-all",
+            "parent": "$dashboard-header",
+            "children": [],
+            "fn": [
+                {
+                    "on": "click",
+                    "name": "refresh all"
+                }
+            ]
+        },
+        {
+            "id": "$metrics-row",
+            "parent": "$1",
+            "children": ["$2", "$5", "$8", "$metric-card"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metrics row"
+                }
+            ]
+        },
+        {
+            "id": "$metric-card",
+            "parent": "$metrics-row",
+            "children": ["$metric-trend", "$metric-value"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric card"
+                }
+            ]
+        },
+        {
+            "id": "$metric-value",
+            "parent": "$metric-card",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric value"
+                }
+            ]
+        },
+        {
+            "id": "$metric-trend",
+            "parent": "$metric-card",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric trend"
+                }
+            ]
+        },
+        {
+            "id": "$2",
+            "parent": "$metrics-row",
+            "children": ["$3", "$4"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric card"
+                }
+            ]
+        },
+        {
+            "id": "$3",
+            "parent": "$2",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric value"
+                }
+            ]
+        },
+        {
+            "id": "$4",
+            "parent": "$2",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric trend"
+                }
+            ]
+        },
+        {
+            "id": "$5",
+            "parent": "$metrics-row",
+            "children": ["$6", "$7"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric card"
+                }
+            ]
+        },
+        {
+            "id": "$6",
+            "parent": "$5",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric value"
+                }
+            ]
+        },
+        {
+            "id": "$7",
+            "parent": "$5",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric trend"
+                }
+            ]
+        },
+        {
+            "id": "$8",
+            "parent": "$metrics-row",
+            "children": ["$10", "$9"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric card"
+                }
+            ]
+        },
+        {
+            "id": "$9",
+            "parent": "$8",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric value"
+                }
+            ]
+        },
+        {
+            "id": "$10",
+            "parent": "$8",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "metric trend"
+                }
+            ]
+        },
+        {
+            "id": "$11",
+            "parent": "$1",
+            "children": ["$apply-date-filter", "$date-from", "$date-to"],
+            "fn": []
+        },
+        {
+            "id": "$date-from",
+            "parent": "$11",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "date from",
+                    "args": {
+                        "date from": "date?"
+                    }
+                }
+            ]
+        },
+        {
+            "id": "$date-to",
+            "parent": "$11",
+            "children": [],
+            "fn": [
+                {
+                    "on": "edit",
+                    "name": "date to",
+                    "args": {
+                        "date to": "date?"
+                    }
+                }
+            ]
+        },
+        {
+            "id": "$apply-date-filter",
+            "parent": "$11",
+            "children": [],
+            "fn": [
+                {
+                    "on": "click",
+                    "name": "apply date filter"
+                }
+            ]
+        },
+        {
+            "id": "$data-table-section",
+            "parent": "$1",
+            "children": ["$export-to-csv", "$export-to-pdf", "$order-table"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "data table section"
+                }
+            ]
+        },
+        {
+            "id": "$order-table",
+            "parent": "$data-table-section",
+            "children": ["$12", "$order-row"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "order table"
+                }
+            ]
+        },
+        {
+            "id": "$order-row",
+            "parent": "$order-table",
+            "children": ["$order-status", "$view-order"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "order row"
+                }
+            ]
+        },
+        {
+            "id": "$order-status",
+            "parent": "$order-row",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "order status"
+                }
+            ]
+        },
+        {
+            "id": "$view-order",
+            "parent": "$order-row",
+            "children": [],
+            "fn": [
+                {
+                    "on": "nav",
+                    "name": "view order"
+                }
+            ]
+        },
+        {
+            "id": "$12",
+            "parent": "$order-table",
+            "children": ["$13", "$14"],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "order row"
+                }
+            ]
+        },
+        {
+            "id": "$13",
+            "parent": "$12",
+            "children": [],
+            "fn": [
+                {
+                    "on": "view",
+                    "name": "order status"
+                }
+            ]
+        },
+        {
+            "id": "$14",
+            "parent": "$12",
+            "children": [],
+            "fn": [
+                {
+                    "on": "nav",
+                    "name": "view order"
+                }
+            ]
+        },
+        {
+            "id": "$export-to-csv",
+            "parent": "$data-table-section",
+            "children": [],
+            "fn": [
+                {
+                    "on": "click",
+                    "name": "export to CSV"
+                }
+            ]
+        },
+        {
+            "id": "$export-to-pdf",
+            "parent": "$data-table-section",
+            "children": [],
+            "fn": [
+                {
+                    "on": "click",
+                    "name": "export to PDF"
+                }
+            ]
+        }
+    ]
+}
