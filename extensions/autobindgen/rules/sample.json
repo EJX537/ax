@@ -1,0 +1,39 @@
+{
+    "prefix": "data-ax",
+    "builtins": true,
+    "rules": [
+        { "select": "[data-testid='tweet']", "as": "ctx", "name": "tweet" },
+        {
+            "select": "[data-testid='tweetText']",
+            "as": "view",
+            "nameFrom": "el.textContent"
+        },
+        { "select": "[data-testid='like']", "as": "click", "name": "like" },
+        { "select": "[data-testid='reply']", "as": "click", "name": "reply" },
+        {
+            "select": "[data-testid='retweet']",
+            "as": "click",
+            "name": "retweet"
+        },
+        {
+            "select": "[data-testid='Bookmark']",
+            "as": "click",
+            "name": "bookmark"
+        },
+
+        { "select": "shreddit-post", "as": "ctx", "nameFrom": "el.id" },
+        {
+            "select": "shreddit-post [slot='title']",
+            "as": "view",
+            "nameFrom": "el.textContent"
+        },
+
+        { "select": ".card", "as": "ctx", "nameFrom": "el.id" },
+        { "select": ".card-title", "as": "view", "nameFrom": "el.textContent" },
+        {
+            "select": ".btn-primary",
+            "as": "click",
+            "nameFrom": "el.textContent"
+        }
+    ]
+}

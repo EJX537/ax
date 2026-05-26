@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 
 export default [
+    { ignores: ["dist/**"] },
     js.configs.recommended,
     {
         files: ["src/**/*.js"],
@@ -13,6 +14,39 @@ export default [
             "prefer-const": "error",
             "no-unused-vars": "off",
             "no-undef": "off",
+        },
+    },
+    {
+        files: ["extensions/**/*.js"],
+        languageOptions: {
+            sourceType: "module",
+            ecmaVersion: "latest",
+            globals: {
+                document: "readonly",
+                window: "readonly",
+            },
+        },
+        rules: {
+            "no-var": "off",
+            "no-unused-vars": "warn",
+            "no-undef": "off",
+        },
+    },
+    {
+        files: ["scripts/**/*.mjs"],
+        languageOptions: {
+            sourceType: "module",
+            ecmaVersion: "latest",
+            globals: {
+                console: "readonly",
+                process: "readonly",
+                require: "readonly",
+            },
+        },
+        rules: {
+            "no-unused-vars": "warn",
+            "no-undef": "off",
+            "no-empty": "off",
         },
     },
     {

@@ -2,6 +2,9 @@
 
 A semantic annotation layer: the DOM is the contract between a webpage and an agent interface.
 
+> **AI Disclosure**: This codebase was developed with AI assistance.
+> **Status**: Proof of concept — not production-ready.
+
 ## What it does
 
 **ax** walks annotated HTML and compiles it into a tree-based DAG an agent can traverse. It executes lifecycle hooks the page promises, returns structured results, and stays out of the way.

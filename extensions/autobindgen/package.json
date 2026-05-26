@@ -1,0 +1,13 @@
+{
+  "name": "ax-autobindgen",
+  "version": "0.1.0",
+  "module": "index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

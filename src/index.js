@@ -132,6 +132,7 @@ const ax = (function () {
     let domWatcher = null;
 
     let version = 0;
+    let idCounter = 0;
 
     /** @type {AxConfig} */
     const axConfig = {
@@ -144,8 +145,45 @@ const ax = (function () {
     // ── Helpers ────────────────────────────────────────────────────
 
     /**
+     * Compute a hash-based id from element DOM path.
+     * @param {Element} el
+     * @returns {string}
+     */
+    function elementPathHash(el) {
+        const parts = [];
+        let cur = el;
+        while (cur && cur !== document.documentElement) {
+            const tag = cur.tagName.toLowerCase();
+            if (cur.id) {
+                parts.unshift("#" + cur.id);
+                break;
+            }
+            let sib = cur;
+            let nth = 1;
+            while (true) {
+                const prev = sib.previousElementSibling;
+                if (!prev) break;
+                sib = prev;
+                if (sib.tagName === cur.tagName) nth++;
+            }
+            parts.unshift(tag + ":nth-child(" + nth + ")");
+            const parent = cur.parentElement;
+            if (!parent) break;
+            cur = parent;
+        }
+        const path = parts.join(" > ");
+        // djb2 hash
+        let hash = 5381;
+        for (let i = 0; i < path.length; i++) {
+            hash = (hash << 5) + hash + path.charCodeAt(i);
+            hash = hash & hash;
+        }
+        return "ax-" + Math.abs(hash).toString(36);
+    }
+
+    /**
      * Get or assign a stable id for an element during scan.
-     * Uses `el.id` when available, warns on duplicate ids, falls back to generated key.
+     * Uses `el.id` when available, warns on duplicate ids, falls back to path hash.
      * @param {Element} el
      * @param {Set<string>} seenIds - per-scan set of already-claimed ids
      * @returns {string}
@@ -160,21 +198,23 @@ const ax = (function () {
                         el.tagName.toLowerCase() +
                         ">, generating fallback",
                 );
-                const id =
-                    "ax-" +
-                    version +
-                    "-" +
-                    Math.random().toString(36).slice(2, 8);
-                elementToId.set(el, id);
-                return id;
+                let fallback = elementPathHash(el);
+                if (seenIds.has(fallback)) {
+                    fallback = "ax-" + ++idCounter;
+                }
+                elementToId.set(el, fallback);
+                return fallback;
             }
             seenIds.add(el.id);
             return el.id;
         }
         const existing = elementToId.get(el);
         if (existing) return existing;
-        const id =
-            "ax-" + version + "-" + Math.random().toString(36).slice(2, 8);
+        let id = elementPathHash(el);
+        // Handle collision — append counter if hash already used this scan
+        if (seenIds.has(id)) {
+            id = "ax-" + ++idCounter;
+        }
         elementToId.set(el, id);
         return id;
     }
@@ -191,8 +231,12 @@ const ax = (function () {
         const len = names.length;
         for (; i < len; i++) {
             const name = names[i];
-            if (!name.startsWith("ax-")) continue;
-            out[name] = el.getAttribute(name) || "";
+            const isAx = name.startsWith("ax-");
+            const isDataAx = !isAx && name.startsWith("data-ax-");
+            if (!isAx && !isDataAx) continue;
+            // Normalise data-ax-* → ax-* for internal key lookup
+            const key = isDataAx ? name.slice(5) : name;
+            out[key] = el.getAttribute(name) || "";
         }
         return out;
     }
@@ -1040,7 +1084,6 @@ const ax = (function () {
             }
             if (!relevant) return;
             lastScan = null;
-            elementToId = new WeakMap();
             if (callback) callback(mutations);
         });
         domWatcher.observe(document.documentElement, {

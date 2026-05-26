@@ -14,12 +14,10 @@ import { resolve } from "path";
 
 // ── Config ──────────────────────────────────────────────────
 
-const ASSETS_DIR = "tests/assets";
-
 const ASSETS = {
     "personal-info-form": "tests/assets/personal-info-form.html",
     "search-results": "tests/assets/search-results.html",
-    "dashboard": "tests/assets/dashboard.html",
+    dashboard: "tests/assets/dashboard.html",
     "inline-edit-table": "tests/assets/inline-edit-table.html",
 };
 
@@ -40,15 +38,26 @@ function setupDOM(htmlPath) {
 
     // Hoist page-level functions so ax eval hooks can resolve them
     const knownFns = [
-        "validateForm", "submitRegistration", "handleSubmitResult", "getField",
+        "validateForm",
+        "submitRegistration",
+        "handleSubmitResult",
+        "getField",
         "submitSearch",
-        "fetchLatestData", "formatCurrency", "normalizeTrend",
-        "applyDateFilter", "exportCSV", "checkQuota",
+        "fetchLatestData",
+        "formatCurrency",
+        "normalizeTrend",
+        "applyDateFilter",
+        "exportCSV",
+        "checkQuota",
         "editRow10234",
     ];
     const scriptSrc = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1];
     if (scriptSrc) {
-        try { dom.window.eval(scriptSrc); } catch {}
+        try {
+            dom.window.eval(scriptSrc);
+        } catch {
+            /* eval may fail on some scripts — ignore */
+        }
         for (const name of knownFns) {
             const val = dom.window[name];
             if (typeof val === "function") globalThis[name] = val;
@@ -72,7 +81,6 @@ function buildAliasMap(scan) {
             aliasMap.set(n.id, "$root");
             continue;
         }
-        const sig = n.fn.map((f) => `${f.on}:${f.name}`).sort().join("|");
         // Use fn-name-based aliases where possible
         const firstFn = n.fn[0];
         if (firstFn) {
@@ -101,18 +109,14 @@ function normalizeScan(scan, aliasMap) {
     for (const [k, v] of Object.entries(scan.dag)) {
         const alias = aliasMap.get(k);
         if (alias) {
-            dag[alias] = v
-                .map((c) => aliasMap.get(c) || c)
-                .sort();
+            dag[alias] = v.map((c) => aliasMap.get(c) || c).sort();
         }
     }
 
     const nodes = scan.nodes.map((n) => ({
         id: aliasMap.get(n.id) || n.id,
         parent: n.parent ? aliasMap.get(n.parent) || n.parent : null,
-        children: n.children
-            .map((c) => aliasMap.get(c) || c)
-            .sort(),
+        children: n.children.map((c) => aliasMap.get(c) || c).sort(),
         fn: n.fn.map((f) => {
             const entry = { on: f.on, name: f.name };
             if (f.args) entry.args = f.args;
@@ -126,7 +130,7 @@ function normalizeScan(scan, aliasMap) {
 // ── Main ────────────────────────────────────────────────────
 
 function generate(name, htmlPath) {
-    const dom = setupDOM(htmlPath);
+    setupDOM(htmlPath);
 
     // Import ax after DOM setup so jsdom globals are in place
     const ax = require("../src/index.js").default || require("../src/index.js");
