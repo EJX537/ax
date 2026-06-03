@@ -50,6 +50,7 @@
  * Serialized node in scan output. `parent` and `children` are key refs.
  * @typedef {Object} AxNode
  * @property {string} id
+ * @property {string} [tagName]
  * @property {string | null} parent
  * @property {string[]} children
  * @property {AxFnEntry[]} fn
@@ -540,6 +541,36 @@ const ax = (function () {
                 return;
             }
 
+            // Skip hidden/non-interactable elements and their subtrees.
+            if (typeof el.checkVisibility === "function" && !el.checkVisibility()) {
+                return;
+            }
+            // Check various computed-style properties that make elements
+            // invisible or non-interactable (not covered by checkVisibility).
+            if (el !== r) {
+                var style = window.getComputedStyle(el);
+                if (style.opacity === "0" || style.pointerEvents === "none") {
+                    return;
+                }
+                // Zero-area rect: element has no visible box (e.g. height:0;overflow:hidden)
+                if (typeof el.getClientRects === "function") {
+                    var rects = el.getClientRects();
+                    if (rects.length === 0) {
+                        return;
+                    }
+                    var hasArea = false;
+                    for (var ri = 0; ri < rects.length; ri++) {
+                        if (rects[ri].width > 0 && rects[ri].height > 0) {
+                            hasArea = true;
+                            break;
+                        }
+                    }
+                    if (!hasArea) {
+                        return;
+                    }
+                }
+            }
+
             const attrs = readAXAttrs(el);
             const entries = readPrimitiveEntries(attrs);
 
@@ -579,6 +610,16 @@ const ax = (function () {
                     fn.push(f);
                 }
 
+                // Include ctx as a fn entry so the tree shows its name
+                if (ctxAttr && ctxAttr.trim()) {
+                    fn.push({ on: "ctx", name: ctxAttr.trim() });
+                } else if (isHtml) {
+                    fn.push({ on: "ctx", name: "root" });
+                }
+
+                // Check if element was annotated by autobindgen (has data-ax-bindgen)
+                const isBindgen = el.hasAttribute("data-ax-bindgen");
+
                 node = {
                     id: id,
                     el: el,
@@ -601,9 +642,11 @@ const ax = (function () {
                 // Build serialized node for extension hooks
                 const serializedNode = {
                     id: node.id,
+                    tagName: el.tagName.toLowerCase(),
                     parent: node._parent ? node._parent.id : null,
                     children: [],
                     fn: node.fn,
+                    bindgen: isBindgen,
                 };
                 buildScan.nodes.push(serializedNode);
                 buildScan.dag[node.id] = [];
@@ -893,6 +936,24 @@ const ax = (function () {
      * @param {any} args
      * @returns {any}
      */
+    /**
+     * Simulate user text input by focusing the element, setting its value,
+     * and dispatching native input/change events so the page's JS reacts.
+     */
+    function editTextInput(el, text) {
+        el.focus();
+        el.value = text;
+        el.dispatchEvent(new InputEvent("input", {
+            inputType: "insertText",
+            data: text,
+            bubbles: true,
+            composed: true,
+        }));
+        el.dispatchEvent(new Event("change", {
+            bubbles: true,
+        }));
+    }
+
     function executeDefault(el, action, args) {
         if (action === "view") {
             return (el.textContent || "").trim();
@@ -913,19 +974,35 @@ const ax = (function () {
                 if (type === "checkbox" || type === "radio") {
                     el.checked = Boolean(args.value);
                 } else {
-                    el.value = String(args.value);
+                    editTextInput(el, String(args.value));
                 }
-            } else if (
-                el instanceof HTMLTextAreaElement ||
-                el instanceof HTMLSelectElement
-            ) {
+            } else if (el instanceof HTMLTextAreaElement) {
+                editTextInput(el, String(args.value));
+            } else if (el instanceof HTMLSelectElement) {
                 el.value = String(args.value);
             }
             return undefined;
         }
         if (action === "nav") {
             if (el instanceof HTMLAnchorElement) {
-                return el.getAttribute("href") || el.href;
+                const href = el.getAttribute("href") || el.href;
+                if (href && href !== "#" && !href.startsWith("javascript:")) {
+                    // Dispatch a proper click event so the browser's default
+                    // navigation handler kicks in, preserving session history.
+                    const ev = new MouseEvent("click", {
+                        bubbles: true,
+                        cancelable: true,
+                        button: 0,
+                    });
+                    el.dispatchEvent(ev);
+                    // If the event was cancelled or the browser didn't
+                    // navigate (e.g. content-script restrictions), fall
+                    // back to direct location assignment.
+                    if (ev.defaultPrevented) {
+                        window.location.href = href;
+                    }
+                }
+                return href;
             }
             /** @type {{ click?: () => void }} */
             const clickable = /** @type {any} */ (el);
@@ -1106,10 +1183,15 @@ const ax = (function () {
         }
     }
 
+    function getNodeId(el) {
+        return elementToId.get(el) || null;
+    }
+
     return {
         scan: scan,
         process: process,
         invoke: invoke,
+        getNodeId: getNodeId,
         definePrimitive: definePrimitive,
         defineExtension: defineExtension,
         removeExtension: removeExtension,
