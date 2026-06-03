@@ -8,6 +8,15 @@
  * No allocating array methods (find, some, map, filter, reduce, forEach).
  * No Object.keys(). No Array.from().
  * All manual for loops to avoid GC pressure.
+ *
+ * TODO(iframe): 
+ *   iframe/frame elements create boundary nodes in the tree but ax cannot
+ *   peer into cross-origin iframes from the top-level content script.
+ *   The host extension is responsible for injecting a separate ax instance
+ *   into each frame + merging results. This core library should remain
+ *   frame-agnostic — the boundary marker is just a signal for the host.
+ *   Remove the iframe/frame special-casing in walk() once frame injection
+ *   is fully handled by the host.
  */
 
 /** @typedef {"click" | "view" | "edit" | "nav" | string} AxFnKind */
@@ -499,7 +508,8 @@ const ax = (function () {
      * @param {Element} [root]
      * @returns {AxScan}
      */
-    function scan(root) {
+    function scan(root, opts) {
+        var showHidden = opts && opts.showHidden === true;
         const r = root || document.documentElement;
         if (!r) {
             return {
@@ -589,7 +599,7 @@ const ax = (function () {
             // through the parent — hidden elements become "transparent" in the tree.
             var hiddenCheck = false;
             if (!isHtml) {
-                if (typeof el.checkVisibility === "function" && !el.checkVisibility()) {
+                if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkVisibilityCSS: true })) {
                     hiddenCheck = true;
                 } else if (window.getComputedStyle(el).opacity === "0") {
                     hiddenCheck = true;
@@ -608,22 +618,27 @@ const ax = (function () {
                         if (!hasArea) hiddenCheck = true;
                     }
                 }
+                // Off-screen elements: positioned outside viewport (e.g. AI Mode header)
+                if (!hiddenCheck) {
+                    var bbox = el.getBoundingClientRect();
+                    if (bbox.bottom < 0 || bbox.right < 0 || bbox.top > window.innerHeight || bbox.left > window.innerWidth) {
+                        hiddenCheck = true;
+                    }
+                }
             }
-            const isHidden = hiddenCheck;
+            var isHidden = showHidden ? false : hiddenCheck;
+
+            // TODO(iframe): iframe/frame elements create boundary marker nodes.
+            // The host extension is responsible for injecting ax into frames.
+            var isFrame = el.tagName === 'IFRAME' || el.tagName === 'FRAME';
 
             /** @type {InternalNode | null} */
             let node = null;
 
-            if (isHtml || isScopeBoundary || hasPrimitives) {
-                // Subsame: view-only children under nav/click parents are redundant
-                // (depth-1 view elements absorbed into actionable parent)
-                const isViewOnly = hasPrimitives && !el.hasAttribute('data-ax-click') && !el.hasAttribute('data-ax-nav') && !el.hasAttribute('data-ax-edit') && !isScopeBoundary;
-                const parentHasNavClick = parent && parent.fn && parent.fn.some(function(f) { return f.on === 'nav' || f.on === 'click'; });
-                const shouldSubsume = isViewOnly && parentHasNavClick;
-
-                if (isHidden || shouldSubsume) {
-                    // Transparent: element is hidden OR is a view-only child of nav/click.
-                    // Children will be linked to the nearest visible ancestor.
+            if (isHtml || isScopeBoundary || hasPrimitives || isFrame) {
+                if (isHidden) {
+                    // Hidden: element is invisible. Children will be linked to the
+                    // nearest visible ancestor (no tree node created for this element).
                 } else {
                 const id = getOrAssignId(el, seenIds);
                 localKeyMap.set(el, id);
@@ -652,6 +667,12 @@ const ax = (function () {
                     fn.push({ on: "ctx", name: ctxAttr.trim() });
                 } else if (isHtml) {
                     fn.push({ on: "ctx", name: "root" });
+                }
+
+                // Frame boundary marker — ax cannot peer into cross-origin frames
+                if (isFrame) {
+                    const frameName = el.getAttribute('title') || el.getAttribute('src') || el.getAttribute('name') || el.id || 'iframe';
+                    fn.push({ on: "frame", name: frameName });
                 }
 
                 // Check if element was annotated by autobindgen (has data-ax-bindgen)
@@ -707,11 +728,14 @@ const ax = (function () {
 
             // Recurse children (only element children, not text nodes)
             // Use indexed for loop instead of Array.from() / for-of
+            // Skip iframe/frame — their content is a separate document
+            if (!isFrame) {
             const childEls = el.children;
             let ci = 0;
             const clen = childEls.length;
             for (; ci < clen; ci++) {
                 walk(childEls[ci], parent, childScope, ignore);
+            }
             }
 
             // ── Post-order: aggregate edit args ──
@@ -723,6 +747,49 @@ const ax = (function () {
                     const aggregated = collectEditArgs(node);
                     if (aggregated) {
                         editFn.args = aggregated;
+                    }
+                }
+
+                // Nav/click + view promotion: if a nav/click parent has view children,
+                // it should also expose a view entry so the agent can read its content.
+                const hasNavClick = node.fn.some(function(f) { return f.on === 'nav' || f.on === 'click'; });
+                if (hasNavClick) {
+                    // Collect view-only leaf children
+                    var viewChildren = [];
+                    for (var vi = 0; vi < node._children.length; vi++) {
+                        var child = node._children[vi];
+                        var isViewOnly = child.fn.length > 0;
+                        for (var vfi = 0; vfi < child.fn.length; vfi++) {
+                            if (child.fn[vfi].on !== 'view') { isViewOnly = false; break; }
+                        }
+                        if (isViewOnly && child._children.length === 0) {
+                            viewChildren.push(child);
+                        }
+                    }
+
+                    if (viewChildren.length === 1) {
+                        // Exactly one view child → subsume it into parent
+                        var subChild = viewChildren[0];
+                        for (var afi = 0; afi < subChild.fn.length; afi++) {
+                            node.fn.push(subChild.fn[afi]);
+                        }
+                        var childIdx = node._children.indexOf(subChild);
+                        if (childIdx !== -1) node._children.splice(childIdx, 1);
+                        var nodeIdx = -1;
+                        for (var ni = 0; ni < buildScan.nodes.length; ni++) {
+                            if (buildScan.nodes[ni].id === subChild.id) { nodeIdx = ni; break; }
+                        }
+                        if (nodeIdx !== -1) buildScan.nodes.splice(nodeIdx, 1);
+                        delete buildScan.dag[subChild.id];
+                    } else if (viewChildren.length > 1) {
+                        // Multiple view children → parent gets a view entry too
+                        // Derive view name from aria-label or first view child or click name
+                        if (!findFnEntry(node.fn, 'view')) {
+                            var viewName = el.getAttribute('aria-label') || viewChildren[0].fn[0].name || '';
+                            if (viewName) {
+                                node.fn.push({ on: 'view', name: viewName });
+                            }
+                        }
                     }
                 }
             }

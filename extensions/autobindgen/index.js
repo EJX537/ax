@@ -33,9 +33,21 @@
 var axAutobindgen = (function () {
     "use strict";
 
-    /** Shortcut to safely get trimmed text content, truncated to 60 chars. */
+    /** Shortcut to safely get trimmed visible text content, truncated to 60 chars.
+     * Uses innerText which skips <style>, <script>, and hidden elements;
+     * falls back to textContent with style/script stripped for SVG/non-rendered contexts. */
     function shortText(el) {
-        return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        var t = el.innerText;
+        if (t && t.replace(/\s+/g, ' ').trim()) {
+            return t.replace(/\s+/g, ' ').trim().slice(0, 60);
+        }
+        // innerText not available or empty (SVG context), get textContent without style/script
+        var clone = el.cloneNode(true);
+        var removals = clone.querySelectorAll('style,script');
+        for (var ri = removals.length - 1; ri >= 0; ri--) {
+            removals[ri].remove();
+        }
+        return (clone.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     }
 
     /**
