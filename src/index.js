@@ -124,6 +124,7 @@ const ax = (function () {
         ["ax-click", "click"],
         ["ax-edit", "edit"],
         ["ax-nav", "nav"],
+        ["ax-ignore", "ignore"],
     ]);
 
     /** @type {Map<string, AxExtension>} */
@@ -268,7 +269,8 @@ const ax = (function () {
             if (raw === undefined) continue;
             const name = raw.trim();
             if (!name) {
-                throw new Error(attr + " requires a non-empty value");
+                // Skip — empty values produce no primitive entry
+                continue;
             }
             entries.push({ attr: attr, kind: kind, name: name });
         }
@@ -279,19 +281,7 @@ const ax = (function () {
      * @param {Element} el
      * @returns {boolean}
      */
-    function isUnderIgnore(el) {
-        /** @type {Element | null} */
-        let node = el;
-        while (node) {
-            if (
-                node.hasAttribute("ax-ignore") ||
-                node.hasAttribute("data-ax-ignore")
-            )
-                return true;
-            node = node.parentElement;
-        }
-        return false;
-    }
+
 
     /**
      * Derive input type from native HTML attributes.
@@ -508,8 +498,7 @@ const ax = (function () {
      * @param {Element} [root]
      * @returns {AxScan}
      */
-    function scan(root, opts) {
-        var showHidden = opts && opts.showHidden === true;
+    function scan(root, _opts) {
         const r = root || document.documentElement;
         if (!r) {
             return {
@@ -546,10 +535,8 @@ const ax = (function () {
          * @param {string} scope - current scope name
          * @param {boolean} ignore - whether subtree is ax-ignored
          */
-        function walk(el, parent, scope, ignore) {
-            if (ignore || isUnderIgnore(el)) {
-                return;
-            }
+        function walk(el, parent, scope, _ignore) {
+
 
             // Skip hidden/non-interactable elements and their subtrees.
             if (typeof el.checkVisibility === "function" && !el.checkVisibility()) {
@@ -594,40 +581,6 @@ const ax = (function () {
                 ctxAttr !== undefined && ctxAttr.trim() !== "";
             const hasPrimitives = entries.length > 0;
 
-            // Check if element is effectively invisible.
-            // When hidden, we skip creating a tree node but still recurse children
-            // through the parent — hidden elements become "transparent" in the tree.
-            var hiddenCheck = false;
-            if (!isHtml) {
-                if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkVisibilityCSS: true })) {
-                    hiddenCheck = true;
-                } else if (window.getComputedStyle(el).opacity === "0") {
-                    hiddenCheck = true;
-                } else if (typeof el.getClientRects === "function") {
-                    var rects = el.getClientRects();
-                    if (rects.length === 0) {
-                        hiddenCheck = true;
-                    } else {
-                        var hasArea = false;
-                        for (var ri = 0; ri < rects.length; ri++) {
-                            if (rects[ri].width > 0 && rects[ri].height > 0) {
-                                hasArea = true;
-                                break;
-                            }
-                        }
-                        if (!hasArea) hiddenCheck = true;
-                    }
-                }
-                // Off-screen elements: positioned outside viewport (e.g. AI Mode header)
-                if (!hiddenCheck) {
-                    var bbox = el.getBoundingClientRect();
-                    if (bbox.bottom < 0 || bbox.right < 0 || bbox.top > window.innerHeight || bbox.left > window.innerWidth) {
-                        hiddenCheck = true;
-                    }
-                }
-            }
-            var isHidden = showHidden ? false : hiddenCheck;
-
             // TODO(iframe): iframe/frame elements create boundary marker nodes.
             // The host extension is responsible for injecting ax into frames.
             var isFrame = el.tagName === 'IFRAME' || el.tagName === 'FRAME';
@@ -636,10 +589,6 @@ const ax = (function () {
             let node = null;
 
             if (isHtml || isScopeBoundary || hasPrimitives || isFrame) {
-                if (isHidden) {
-                    // Hidden: element is invisible. Children will be linked to the
-                    // nearest visible ancestor (no tree node created for this element).
-                } else {
                 const id = getOrAssignId(el, seenIds);
                 localKeyMap.set(el, id);
 
@@ -720,7 +669,6 @@ const ax = (function () {
                 // Change parent for descendants — new scope depth starts here
                 parent = node;
             }
-            }
 
             // Track scope for children
             const childScope =
@@ -734,7 +682,7 @@ const ax = (function () {
             let ci = 0;
             const clen = childEls.length;
             for (; ci < clen; ci++) {
-                walk(childEls[ci], parent, childScope, ignore);
+                walk(childEls[ci], parent, childScope);
             }
             }
 
@@ -767,23 +715,25 @@ const ax = (function () {
                         }
                     }
 
-                    if (viewChildren.length === 1) {
-                        // Exactly one view child → subsume it into parent
-                        var subChild = viewChildren[0];
-                        for (var afi = 0; afi < subChild.fn.length; afi++) {
-                            node.fn.push(subChild.fn[afi]);
+                    if (viewChildren.length > 0) {
+                        // Subsume ALL view-only leaf children under nav/click parents.
+                        // These are layout artifacts (img thumbnails, badge labels, price spans)
+                        // that duplicate info already in the parent's nav/view entries.
+                        for (var si = 0; si < viewChildren.length; si++) {
+                            var subChild = viewChildren[si];
+                            for (var afi = 0; afi < subChild.fn.length; afi++) {
+                                node.fn.push(subChild.fn[afi]);
+                            }
+                            var childIdx = node._children.indexOf(subChild);
+                            if (childIdx !== -1) node._children.splice(childIdx, 1);
+                            var nodeIdx = -1;
+                            for (var ni = 0; ni < buildScan.nodes.length; ni++) {
+                                if (buildScan.nodes[ni].id === subChild.id) { nodeIdx = ni; break; }
+                            }
+                            if (nodeIdx !== -1) buildScan.nodes.splice(nodeIdx, 1);
+                            delete buildScan.dag[subChild.id];
                         }
-                        var childIdx = node._children.indexOf(subChild);
-                        if (childIdx !== -1) node._children.splice(childIdx, 1);
-                        var nodeIdx = -1;
-                        for (var ni = 0; ni < buildScan.nodes.length; ni++) {
-                            if (buildScan.nodes[ni].id === subChild.id) { nodeIdx = ni; break; }
-                        }
-                        if (nodeIdx !== -1) buildScan.nodes.splice(nodeIdx, 1);
-                        delete buildScan.dag[subChild.id];
-                    } else if (viewChildren.length > 1) {
-                        // Multiple view children → parent gets a view entry too
-                        // Derive view name from aria-label or first view child or click name
+                        // Still promote view to parent if not already present
                         if (!findFnEntry(node.fn, 'view')) {
                             var viewName = el.getAttribute('aria-label') || viewChildren[0].fn[0].name || '';
                             if (viewName) {
@@ -795,7 +745,7 @@ const ax = (function () {
             }
         }
 
-        walk(r, null, "__root__", false);
+        walk(r, null, "__root__");
 
         // ── Finalize parent/children refs on serialized nodes ──
         // (Nodes were already serialized during walk for extension hooks.)

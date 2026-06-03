@@ -391,7 +391,7 @@ var axAutobindgen = (function () {
     var annotated;
 
     /** Prefix to use for generated attributes */
-    var prefix = "data-ax";
+    var prefix = "ax";
 
     /** Track whether builtins are enabled */
     var useBuiltins = true;
@@ -547,7 +547,10 @@ var axAutobindgen = (function () {
         { select: "[role='listbox']", as: "view", nameFrom: "el.getAttribute('aria-label') || 'listbox'" },
 
         // Navigation — all <a> elements
-        { select: "a[href]", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || (el.querySelector('img')?el.querySelector('img').alt:'') || (el.querySelector('svg title')?el.querySelector('svg title').textContent.trim():'') || el.pathname.replace(/[\\/\\-_]/g,' ').trim().slice(0,40) || el.hostname || 'link'" },
+        // Non-navigational anchors (href="javascript:...", href="#") are buttons, not links.
+        { select: "a[href^='javascript:']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.getAttribute('title') || 'button'" },
+        { select: "a[href^='#']", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'link'" },
+        { select: "a[href]", as: "nav", nameFrom: "el.getAttribute('aria-label') || el.getAttribute('title') || shortText(el) || (el.querySelector('img')?el.querySelector('img').alt:'') || (el.querySelector('svg title')?el.querySelector('svg title').textContent.trim():'') || el.pathname.replace(/[\\/\\-_]/g,' ').trim().slice(0,40) || el.hostname || 'link'" },
         { select: "[role='link']", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'link'" },
 
         // Clickable elements
@@ -556,6 +559,11 @@ var axAutobindgen = (function () {
         { select: "input[type='submit']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'submit'" },
         { select: "input[type='button']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'button'" },
         { select: "[role='button']", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || el.getAttribute('aria-label') || el.getAttribute('title') || 'button'" },
+        // Data-action attributes — many JS frameworks (Amazon, Bootstrap, jQuery)
+        // use data-action="*" to attach click handlers to non-button elements.
+        // These are interactive even without native onclick/role attributes.
+        { select: "[data-action]", as: "click", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'clickable'" },
+
         // Interactive ARIA roles — elements like autocomplete suggestions, menu items,
         // tabs, tree items, switches. These are clickable by definition even without
         // native <a>/<button> elements or explicit onclick attributes.
@@ -612,6 +620,9 @@ var axAutobindgen = (function () {
         root = root || document.documentElement;
         annotationOrder = [];
         annotated = new WeakMap();
+
+        // Tags that are never useful to annotate — skip immediately
+        var SKIP_TAGS = { br:1, hr:1, wbr:1, template:1, slot:1, base:1, link:1, meta:1, source:1, track:1, param:1, area:1, col:1, colgroup:1 };
         // Remove all previous bindgen annotations
         var prev = root.querySelectorAll("[" + prefix + "-ctx],[" + prefix + "-click],[" + prefix + "-nav],[" + prefix + "-edit],[" + prefix + "-view],[" + prefix + "-ignore],[" + prefix + "-bindgen]");
         for (var pi = 0; pi < prev.length; pi++) {
@@ -624,12 +635,50 @@ var axAutobindgen = (function () {
             pel.removeAttribute(prefix + "-ignore");
             pel.removeAttribute(prefix + "-bindgen");
         }
+        // Pre-compute rule matches once using per-rule querySelectorAll
+        var elRuleMap = precomputeMatches(root);
+
         var all = root.querySelectorAll("*");
         for (var i = 0; i < all.length; i++) {
             var el = all[i];
+            if (SKIP_TAGS[el.tagName.toLowerCase()]) continue;
             if (hasNativeAX(el)) continue;
             if (annotated.has(el)) continue;
-            var rule = matchElement(el);
+            // Skip hidden/invisible elements — they are not interactable
+            if (el.nodeType === 1) {
+                var hc = false;
+                if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkVisibilityCSS: true })) {
+                    hc = true;
+                } else if (window.getComputedStyle(el).opacity === "0") {
+                    hc = true;
+                } else if (typeof el.getClientRects === "function") {
+                    var rects = el.getClientRects();
+                    if (rects.length === 0) {
+                        hc = true;
+                    } else {
+                        var hasArea = false;
+                        for (var ri = 0; ri < rects.length; ri++) {
+                            if (rects[ri].width > 0 && rects[ri].height > 0) {
+                                hasArea = true;
+                                break;
+                            }
+                        }
+                        if (!hasArea) hc = true;
+                    }
+                }
+                if (!hc) {
+                    var bbox = el.getBoundingClientRect();
+                    if (bbox.bottom < 0 || bbox.right < 0 || bbox.top > window.innerHeight || bbox.left > window.innerWidth) {
+                        hc = true;
+                    }
+                }
+                if (hc) {
+                    el.setAttribute(prefix + "-ignore", "hidden");
+                    continue;
+                }
+            }
+            // O(1) lookup from precomputed map
+            var rule = elRuleMap.get(el) || null;
             if (!rule) continue;
             applyAnnotation(el, rule);
             annotated.set(el, true);
@@ -659,7 +708,7 @@ var axAutobindgen = (function () {
      */
     function applyAnnotation(el, rule) {
         if (rule.as === "ignore") {
-            el.setAttribute(prefix + "-ignore", "");
+            el.setAttribute(prefix + "-ignore", "ignored");
             return;
         }
 
@@ -750,6 +799,45 @@ var axAutobindgen = (function () {
                 }
             }
         });
+    }
+
+    // ── Pre-compute rule matches ─────────────────────────────
+
+    /**
+     * Pre-compute rule matches for all CSS-selector-based rules at once.
+     * Uses querySelectorAll per rule (O(R) queries instead of O(N*R) el.matches calls).
+     * Rules with .match (custom matchers) are NOT included — they must be handled
+     * element-by-element.
+     *
+     * Preserves first-match-wins ordering: user rules first, then builtins.
+     *
+     * @param {Element} root - DOM root to scan within
+     * @returns {Map<Element, object>} Map from element to matching rule
+     */
+    function precomputeMatches(root) {
+        /** @type {Map<Element, object>} */
+        var map = new Map();
+
+        // Process all rules (user + builtins) in order, first-match-wins
+        var allRules = rules.concat(useBuiltins ? BUILTIN_RULES : []);
+        for (var ri = 0; ri < allRules.length; ri++) {
+            var rule = allRules[ri];
+            if (!rule.select) continue; // skip match-type rules
+            try {
+                var matched = root.querySelectorAll(rule.select);
+                for (var mi = 0; mi < matched.length; mi++) {
+                    var el = matched[mi];
+                    if (!map.has(el)) {
+                        map.set(el, rule);
+                    }
+                }
+            } catch (e) {
+                // Some selectors may throw on invalid pages
+                axLog("bind", "querySelectorAll error for '" + rule.select + "': " + e);
+            }
+        }
+
+        return map;
     }
 
     /**
