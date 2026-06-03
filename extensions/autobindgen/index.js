@@ -532,6 +532,7 @@ var axAutobindgen = (function () {
         { select: "[role='dialog']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || 'dialog'" },
         { select: "[role='main']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || 'main'" },
         { select: "[role='navigation']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || linkList(el) || 'navigation'" },
+        { select: "[role='listbox']", as: "view", nameFrom: "el.getAttribute('aria-label') || 'listbox'" },
 
         // Navigation — all <a> elements
         { select: "a[href]", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || (el.querySelector('img')?el.querySelector('img').alt:'') || (el.querySelector('svg title')?el.querySelector('svg title').textContent.trim():'') || el.pathname.replace(/[\\/\\-_]/g,' ').trim().slice(0,40) || el.hostname || 'link'" },
@@ -543,6 +544,14 @@ var axAutobindgen = (function () {
         { select: "input[type='submit']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'submit'" },
         { select: "input[type='button']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'button'" },
         { select: "[role='button']", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || el.getAttribute('aria-label') || el.getAttribute('title') || 'button'" },
+        // Interactive ARIA roles — elements like autocomplete suggestions, menu items,
+        // tabs, tree items, switches. These are clickable by definition even without
+        // native <a>/<button> elements or explicit onclick attributes.
+        { select: "[role='option']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'option'" },
+        { select: "[role='menuitem']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'menuitem'" },
+        { select: "[role='tab']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'tab'" },
+        { select: "[role='treeitem']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'treeitem'" },
+        { select: "[role='switch']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'switch'" },
         { select: "[onclick]", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || 'clickable'" },
         { select: "input[type='checkbox']", as: "click", nameFrom: "el.labels?.length ? shortText(el.labels[0]) : el.value || el.name || 'checkbox'" },
         { select: "input[type='radio']", as: "click", nameFrom: "el.labels?.length ? shortText(el.labels[0]) : el.value || el.name || 'radio'" },

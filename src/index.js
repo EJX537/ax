@@ -584,10 +584,41 @@ const ax = (function () {
                 ctxAttr !== undefined && ctxAttr.trim() !== "";
             const hasPrimitives = entries.length > 0;
 
+            // Check if element is effectively invisible.
+            // When hidden, we skip creating a tree node but still recurse children
+            // through the parent — hidden elements become "transparent" in the tree.
+            var hiddenCheck = false;
+            if (!isHtml) {
+                if (typeof el.checkVisibility === "function" && !el.checkVisibility()) {
+                    hiddenCheck = true;
+                } else if (window.getComputedStyle(el).opacity === "0") {
+                    hiddenCheck = true;
+                } else if (typeof el.getClientRects === "function") {
+                    var rects = el.getClientRects();
+                    if (rects.length === 0) {
+                        hiddenCheck = true;
+                    } else {
+                        var hasArea = false;
+                        for (var ri = 0; ri < rects.length; ri++) {
+                            if (rects[ri].width > 0 && rects[ri].height > 0) {
+                                hasArea = true;
+                                break;
+                            }
+                        }
+                        if (!hasArea) hiddenCheck = true;
+                    }
+                }
+            }
+            const isHidden = hiddenCheck;
+
             /** @type {InternalNode | null} */
             let node = null;
 
             if (isHtml || isScopeBoundary || hasPrimitives) {
+                if (isHidden) {
+                    // Hidden: element becomes transparent in the tree.
+                    // Children will be linked to the nearest visible ancestor.
+                } else {
                 const id = getOrAssignId(el, seenIds);
                 localKeyMap.set(el, id);
 
@@ -661,6 +692,7 @@ const ax = (function () {
                 }
                 // Change parent for descendants — new scope depth starts here
                 parent = node;
+            }
             }
 
             // Track scope for children
