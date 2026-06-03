@@ -615,8 +615,14 @@ const ax = (function () {
             let node = null;
 
             if (isHtml || isScopeBoundary || hasPrimitives) {
-                if (isHidden) {
-                    // Hidden: element becomes transparent in the tree.
+                // Subsame: view-only children under nav/click parents are redundant
+                // (depth-1 view elements absorbed into actionable parent)
+                const isViewOnly = hasPrimitives && !el.hasAttribute('data-ax-click') && !el.hasAttribute('data-ax-nav') && !el.hasAttribute('data-ax-edit') && !isScopeBoundary;
+                const parentHasNavClick = parent && parent.fn && parent.fn.some(function(f) { return f.on === 'nav' || f.on === 'click'; });
+                const shouldSubsume = isViewOnly && parentHasNavClick;
+
+                if (isHidden || shouldSubsume) {
+                    // Transparent: element is hidden OR is a view-only child of nav/click.
                     // Children will be linked to the nearest visible ancestor.
                 } else {
                 const id = getOrAssignId(el, seenIds);
