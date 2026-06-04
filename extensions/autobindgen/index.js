@@ -83,297 +83,281 @@ var axAutobindgen = (function () {
         else if (cat === "bind") { console.log("[ax-autobindgen]", msg); }
     }
 
-    // ── Safe expression evaluator (no new Function/eval) ──────
+    // ── Element AST name extraction ──────────────────────
+    //
+    // Instead of evaluating JS expressions, each nameFrom is an array of
+    // extraction tokens based on the W3C AccName 1.2 algorithm. Each token
+    // is tried in order; the first non-empty result wins.
+    // No eval, no new Function, no recursive descent parser.
+    //
+    // Token formats:
+    //   @attrName        → el.getAttribute('attrName')
+    //   $propName        → el[propName] as string
+    //   $propName:N      → el[propName] as string, sliced to N chars
+    //   text             → shortText(el) (innerText with style/script strip fallback)
+    //   text:N           → shortText(el).slice(0,N)
+    //   innerText        → el.innerText directly (rendered text with br→newline)
+    //   innerText:N      → el.innerText.slice(0,N)
+    //   links            → linkList(el) — all descendant <a> text joined
+    //   label            → el.labels[0] text (for form controls)
+    //   legend           → first <legend> descendant text
+    //   caption          → first <caption> descendant text
+    //   figcaption       → first <figcaption> descendant text
+    //   svg-title        → first <title> child of <svg>
+    //   >selector        → querySelector(sel).textContent trimmed+sliced(40)
+    //   >selector@attr   → querySelector(sel).getAttribute(attr)
+    //   >selector@text   → querySelector(sel).textContent trimmed+sliced(40)
+    //   ^selector@attr   → closest(sel).getAttribute(attr) — climb up
+    //   ?visible         → "1" if el.checkVisibility({checkVisibilityCSS:true}) else undefined
+    //   ?interactive     → "1" if el is interactive (button,a[href],input,select,textarea,[tabindex],[role=button],[contenteditable])
+    //   ?disabled        → "1" if el.disabled or [aria-disabled=true]
+    //   ?checked         → "1" if el.checked or [aria-checked=true]
+    //   any other string → returned as literal fallback
 
     /**
-     * Evaluate a nameFrom expression against an element without using
-     * new Function or eval (both blocked by page CSP).
-     *
-     * Supports the patterns used in BUILTIN_RULES:
-     *   - || chains, &&, ternary ( ? : )
-     *   - shortText(el), el.getAttribute('x'), el.querySelector('x')
-     *   - el.id, el.name, el.pathname, el.hostname, el.type, el.href, el.alt, el.value, el.placeholder, el.textContent, el.innerText, el.tagName, el.labels, el.checked
-     *   - .trim(), .slice(N,M), .replace(/.../g,'...'), .toLowerCase()
-     *   - string literals in single quotes
-     *   - optional chaining (?.) — just treats as regular access
-     *   - (expr) grouping
+     * Apply a post-processing transform to a string value.
+     * Supported: |trim, |lower, |upper, |truncate:N, |slug
      */
-    function safeEval(el, expr) {
-        if (typeof expr !== "string") return "";
-        expr = expr.trim();
-        if (!expr) return "";
+    function applyTransform(val, transform) {
+        if (!val || typeof val !== "string") return val;
+        if (transform === 'trim') return val.trim();
+        if (transform === 'lower') return val.toLowerCase();
+        if (transform === 'upper') return val.toUpperCase();
+        if (transform.slice(0, 9) === 'truncate:') {
+            var n = parseInt(transform.slice(9), 10);
+            if (!isNaN(n)) return val.trim().slice(0, n);
+        }
+        if (transform === 'slug') {
+            return val.replace(/[\/\-_]+/g, ' ').trim() || undefined;
+        }
+        return val;
+    }
 
-        var pos = 0;
-        var ch = function () { return expr[pos]; };
-        var advance = function () { pos++; };
+    /**
+     * Get text from a child element via querySelector, trimmed and sliced to 40.
+     */
+    function childText(el, sel) {
+        if (!el.querySelector) return undefined;
+        var child = el.querySelector(sel);
+        if (!child) return undefined;
+        return (child.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+    }
 
-        /** Skip whitespace */
-        function skipWS() {
-            while (pos < expr.length && (expr[pos] === ' ' || expr[pos] === '\t' || expr[pos] === '\n')) advance();
+    /**
+     * Extract a single value from an element using a token string.
+     */
+    function extractOne(el, token) {
+        if (typeof token !== "string" || !token) return undefined;
+
+        var raw = token;
+        var transform = null;
+        // Check for |transform suffix
+        var pipeIdx = token.indexOf('|');
+        if (pipeIdx > 0) {
+            raw = token.slice(0, pipeIdx);
+            transform = token.slice(pipeIdx + 1);
+            if (!transform) transform = null;
         }
 
-        /** Parse a string literal (single-quoted) */
-        function parseString() {
-            if (ch() !== "'") return undefined;
-            advance(); // skip opening '
-            var s = "";
-            while (pos < expr.length && ch() !== "'") {
-                if (ch() === "\\") { advance(); if (pos < expr.length) s += ch(); }
-                else { s += ch(); }
-                advance();
-            }
-            if (pos < expr.length) advance(); // skip closing '
-            return s;
+        var result = extractRaw(el, raw);
+        if (result && typeof result === "string") {
+            if (transform) result = applyTransform(result, transform);
+            return result || undefined;
+        }
+        return result;
+    }
+
+    function extractRaw(el, token) {
+        // @attrName → attribute
+        if (token.charCodeAt(0) === 64) { // '@'
+            if (!el.getAttribute) return undefined;
+            return el.getAttribute(token.slice(1)) || undefined;
         }
 
-        /** Parse a negative number (like -1) */
-        function parseNumber() {
-            var s = "";
-            if (ch() === '-') { s += '-'; advance(); }
-            while (pos < expr.length && expr[pos] >= '0' && expr[pos] <= '9') {
-                s += ch(); advance();
+        // $propName[:N] → property
+        if (token.charCodeAt(0) === 36) { // '$'
+            var prop = token.slice(1);
+            var truncate = null;
+            var colonIdx = prop.indexOf(':');
+            if (colonIdx > 0) {
+                truncate = parseInt(prop.slice(colonIdx + 1), 10);
+                prop = prop.slice(0, colonIdx);
             }
-            if (s === '-' || s === "") return undefined;
-            return parseInt(s, 10);
-        }
-
-        /** Get a property value from obj by name */
-        function getProp(obj, name) {
-            if (obj == null) return undefined;
-            if (name === "trim") return function () { return String(obj).trim(); };
-            if (name === "slice") return function (a, b) { return String(obj).slice(a, b); };
-            if (name === "toLowerCase") return function () { return String(obj).toLowerCase(); };
-            if (name === "length") return obj.length;
-            return obj[name];
-        }
-
-        /**
-         * Consume a chain of .method(args) or .property accesses on a value.
-         * Returns the final value (may be string, number, null).
-         */
-        function chainCalls(val) {
-            while (pos < expr.length) {
-                skipWS();
-                if (ch() === '.') {
-                    advance();
-                    skipWS();
-                    // Optional chaining ?.
-                    if (ch() === '?') { advance(); if (ch() === '.') advance(); }
-                    var propName = "";
-                    while (pos < expr.length && /[a-zA-Z0-9_]/.test(ch())) {
-                        propName += ch(); advance();
-                    }
-                    if (!propName) break;
-                    skipWS();
-                    if (ch() === '(') {
-                        advance();
-                        var args = [];
-                        skipWS();
-                        if (ch() !== ')') {
-                            args.push(parseOrExpr());
-                            skipWS();
-                            while (ch() === ',') {
-                                advance(); skipWS();
-                                args.push(parseOrExpr());
-                                skipWS();
-                            }
-                        }
-                        if (ch() === ')') advance();
-                        if (val == null) return undefined;
-                        if (typeof val[propName] === "function") {
-                            val = val[propName].apply(val, args);
-                        } else {
-                            return undefined;
-                        }
-                    } else {
-                        if (val == null) return undefined;
-                        val = getProp(val, propName);
-                    }
-                } else if (ch() === '?') {
-                    advance();
-                    if (ch() === '.' || ch() === '?') advance();
-                    skipWS();
-                    // read property name — same as after '.'
-                    var propName = "";
-                    while (pos < expr.length && /[a-zA-Z0-9_]/.test(ch())) {
-                        propName += ch(); advance();
-                    }
-                    if (!propName) break;
-                    skipWS();
-                    if (ch() === '(') {
-                        advance();
-                        var args = [];
-                        skipWS();
-                        if (ch() !== ')') {
-                            args.push(parseOrExpr());
-                            skipWS();
-                            while (ch() === ',') {
-                                advance(); skipWS();
-                                args.push(parseOrExpr());
-                                skipWS();
-                            }
-                        }
-                        if (ch() === ')') advance();
-                        if (val == null) return undefined;
-                        if (typeof val[propName] === "function") {
-                            val = val[propName].apply(val, args);
-                        } else {
-                            return undefined;
-                        }
-                    } else {
-                        if (val == null) return undefined;
-                        val = getProp(val, propName);
-                    }
-                } else {
-                    break;
-                }
+            var v;
+            if (prop === 'pathname' && el.pathname) {
+                v = el.pathname.replace(/[\/\-_]/g, ' ').trim();
+            } else if (prop === 'hostname' && el.hostname) {
+                v = el.hostname;
+            } else if (prop === 'innerText') {
+                v = el.innerText || '';
+            } else if (prop === 'textContent') {
+                v = el.textContent || '';
+            } else if (el[prop] !== undefined && el[prop] !== null) {
+                v = el[prop];
+                if (typeof v !== 'string') v = String(v);
             }
-            return val;
-        }
-
-        /**
-         * Parse a simple value or (expr) and then chain method calls.
-         */
-        function parseValue() {
-            skipWS();
-            if (pos >= expr.length) return undefined;
-
-            // String literal
-            if (ch() === "'") return chainCalls(parseString());
-
-            // Numeric literal
-            if (ch() === '-' || (ch() >= '0' && ch() <= '9')) {
-                var n = parseNumber();
-                if (n !== undefined) return chainCalls(n);
-            }
-
-            // (expr)
-            if (ch() === '(') {
-                advance();
-                var inner = parseOrExpr();
-                skipWS();
-                if (ch() === ')') advance();
-                return chainCalls(inner);
-            }
-
-            // Identifier
-            var path = "";
-            while (pos < expr.length && /[a-zA-Z0-9_]/.test(ch())) {
-                path += ch(); advance();
-            }
-            if (!path) return undefined;
-
-            // Function call: shortText(el) or similar
-            skipWS();
-            if (ch() === '(') {
-                advance();
-                var argVal = parseOrExpr();
-                skipWS();
-                if (ch() === ')') advance();
-                if (path === "shortText" && typeof argVal !== "undefined") {
-                    return chainCalls(shortText(argVal));
-                }
-                if (path === "linkList" && typeof argVal !== "undefined") {
-                    return chainCalls(linkList(argVal));
-                }
-                return undefined;
-            }
-
-            // el.* chain
-            if (path === "el") {
-                var val = chainCalls(el);
-                if (typeof val === "function") return "";
-                if (val == null) return "";
-                return val;
-            }
-
-            // Plain word fallback
-            return path;
-        }
-
-        /** Parse a ternary * ... : ... */
-        function parseConditional() {
-            var cond = parseOrExpr();
-            if (cond === undefined) return undefined;
-            // Once parseOrExpr returns, check if followed by ?
-            // We handle this differently: parseOrExpr calls us back
-            return cond;
-        }
-
-        /** Parse the right side of a ternary */
-        function parseTernaryTail() {
-            skipWS();
-            if (ch() === '?') {
-                advance();
-                var trueVal = parseOrExpr();
-                skipWS();
-                var falseVal = undefined;
-                if (ch() === ':') {
-                    advance();
-                    falseVal = parseOrExpr();
-                }
-                return trueVal !== undefined && trueVal !== null && trueVal !== false && trueVal !== "" ? trueVal : (falseVal !== undefined ? falseVal : "");
+            if (v && typeof v === 'string') {
+                if (truncate && !isNaN(truncate)) return v.slice(0, truncate) || undefined;
+                return v.trim ? v.trim() || undefined : v || undefined;
             }
             return undefined;
         }
 
-        /**
-         * Parse top-level expression with || and && chains.
-         * Each operand is parsed, evaluated, and if it's truthy (for ||)
-         * returns it immediately.
-         */
-        function parseOrExpr() {
-            var result = parseMaybeTernary();
-            while (true) {
-                skipWS();
-                if (expr.substr(pos, 2) === "||") {
-                    pos += 2;
-                    var right = parseMaybeTernary();
-                    // || returns first truthy value
-                    if (result && typeof result === "string" && result.length > 0) return result;
-                    if (result !== undefined && result !== null && result !== false && result !== "") return result;
-                    result = right;
-                } else if (expr.substr(pos, 2) === "&&") {
-                    pos += 2;
-                    var andRight = parseMaybeTernary();
-                    result = (result && andRight !== undefined && andRight !== null && andRight !== false && andRight !== "") ? andRight : "";
-                } else {
-                    break;
-                }
-            }
-            return result;
+        // text[:N] → shortText
+        if (token === 'text') {
+            var t = shortText(el);
+            return t || undefined;
+        }
+        if (token.slice(0, 5) === 'text:') {
+            var n = parseInt(token.slice(5), 10);
+            if (isNaN(n)) return undefined;
+            var t = shortText(el);
+            return t ? t.slice(0, n) : undefined;
         }
 
-        /** Ternary or simple value */
-        function parseMaybeTernary() {
-            var val = parseValue();
-            if (val === undefined) return undefined;
-            skipWS();
-            if (ch() === '?') {
-                advance();
-                var truePart = parseOrExpr();
-                skipWS();
-                var falsePart = undefined;
-                if (ch() === ':') {
-                    advance();
-                    falsePart = parseOrExpr();
-                }
-                // Evaluate ternary: if val is truthy, return truePart, else falsePart
-                var isTruthy = (val !== undefined && val !== null && val !== false && val !== "" && val !== 0);
-                return isTruthy ? (truePart !== undefined ? truePart : "") : (falsePart !== undefined ? falsePart : "");
-            }
-            return val;
+        // innerText[:N] → el.innerText
+        if (token === 'innerText') {
+            return (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
+        }
+        if (token.slice(0, 10) === 'innerText:') {
+            var n2 = parseInt(token.slice(10), 10);
+            if (isNaN(n2)) return undefined;
+            return (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, n2) || undefined;
         }
 
-        try {
-            var result = parseOrExpr();
-            if (typeof result === "string") return result;
-            if (result !== undefined && result !== null) return String(result);
-            return "";
-        } catch (e) {
-            axLog("name", "safeEval error " + (expr || "").slice(0, 80) + " " + e);
-            return "";
+        // links → linkList
+        if (token === 'links') {
+            return linkList(el) || undefined;
         }
+
+        // Structural relationship tokens
+        if (token === 'label') {
+            if (el.labels && el.labels.length) {
+                return shortText(el.labels[0]) || undefined;
+            }
+            return undefined;
+        }
+        if (token === 'legend') { return childText(el, 'legend'); }
+        if (token === 'caption') { return childText(el, 'caption'); }
+        if (token === 'figcaption') { return childText(el, 'figcaption'); }
+        if (token === 'svg-title') {
+            // First <title> child of an <svg>
+            if (el.querySelector) {
+                var svg = el.tagName === 'svg' ? el : el.querySelector('svg');
+                if (svg) {
+                    for (var ci = 0; ci < svg.children.length; ci++) {
+                        if (svg.children[ci].tagName === 'title') {
+                            return (svg.children[ci].textContent || '').trim().slice(0, 60) || undefined;
+                        }
+                    }
+                }
+            }
+            return undefined;
+        }
+
+        // >selector[@attr|@text]
+        if (token.charCodeAt(0) === 62 && token.charCodeAt(1) !== 62) { // '>' not '>>'
+            if (!el.querySelector) return undefined;
+            var atSign = token.indexOf('@', 1);
+            var sel, what;
+            if (atSign > 1) {
+                sel = token.slice(1, atSign);
+                what = token.slice(atSign + 1);
+            } else {
+                sel = token.slice(1);
+                what = 'text';
+            }
+            var child = el.querySelector(sel);
+            if (!child) return undefined;
+            if (what === 'text' || what === 'textContent') {
+                return (child.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+            }
+            if (what === 'innerText') {
+                return (child.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+            }
+            // attribute
+            return child.getAttribute ? (child.getAttribute(what) || undefined) : undefined;
+        }
+
+        // ^selector[@attr|@text] — climb ancestors via closest()
+        if (token.charCodeAt(0) === 94) { // '^'
+            if (!el.closest) return undefined;
+            var atSign2 = token.indexOf('@', 1);
+            var sel2, what2;
+            if (atSign2 > 1) {
+                sel2 = token.slice(1, atSign2);
+                what2 = token.slice(atSign2 + 1);
+            } else {
+                sel2 = token.slice(1);
+                what2 = 'text';
+            }
+            var parent = el.closest(sel2);
+            if (!parent || parent === el) return undefined;
+            if (what2 === 'text' || what2 === 'textContent') {
+                return (parent.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+            }
+            if (what2 === 'innerText') {
+                return (parent.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+            }
+            return parent.getAttribute ? (parent.getAttribute(what2) || undefined) : undefined;
+        }
+
+        // ?boolean queries
+        if (token.charCodeAt(0) === 63) { // '?'
+            var query = token.slice(1);
+            if (query === 'visible') {
+                if (typeof el.checkVisibility === 'function') {
+                    return el.checkVisibility({ checkVisibilityCSS: true }) ? '1' : undefined;
+                }
+                return undefined;
+            }
+            if (query === 'interactive') {
+                if (el.matches) {
+                    return el.matches('button,a[href],input,select,textarea,[tabindex],[role=button],[role=link],[role=option],[role=tab],[contenteditable]') ? '1' : undefined;
+                }
+                return undefined;
+            }
+            if (query === 'disabled') {
+                if (el.disabled || (el.getAttribute && el.getAttribute('aria-disabled') === 'true')) return '1';
+                return undefined;
+            }
+            if (query === 'checked') {
+                if (el.checked || (el.getAttribute && el.getAttribute('aria-checked') === 'true')) return '1';
+                return undefined;
+            }
+            if (query === 'selected') {
+                if (el.selected || (el.getAttribute && el.getAttribute('aria-selected') === 'true')) return '1';
+                return undefined;
+            }
+            if (query === 'has-children') {
+                return el.children && el.children.length > 0 ? '1' : undefined;
+            }
+            if (query === 'hidden') {
+                if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return '1';
+                if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ checkVisibilityCSS: true })) return '1';
+                return undefined;
+            }
+            return undefined;
+        }
+
+        // Literal fallback
+        return token;
+    }
+
+    /**
+     * Try each extraction token in order, returning the first non-empty
+     * string result. Returns empty string if nothing matches.
+     */
+    function extractName(el, sources) {
+        if (!sources || !sources.length) return "";
+        for (var i = 0; i < sources.length; i++) {
+            var src = sources[i];
+            var val = extractOne(el, src);
+            if (val && typeof val === "string" && val.trim()) {
+                return val.trim();
+            }
+        }
+        return "";
     }
 
     // ── Internal state ───────────────────────────────────────────
@@ -406,33 +390,14 @@ var axAutobindgen = (function () {
     function resolveName(el, rule) {
         if (rule.name) return rule.name;
         if (!rule.nameFrom) return "";
-        var val = safeEval(el, rule.nameFrom);
-        if (val && typeof val === "string") {
-            var trimmed = val.trim();
-            if (!trimmed) {
-                axLog("name", "whitespace-only " + rule.as + " " + rule.select + " val=" + JSON.stringify(val));
-            }
-            return trimmed;
+        if (typeof rule.nameFrom === "string") {
+            // Legacy string nameFrom — treat as a single token
+            var v = extractOne(el, rule.nameFrom);
+            if (v && typeof v === "string") return v.trim();
+            return "";
         }
-        if (el && el.tagName) {
-            var href_ = el.getAttribute ? el.getAttribute("href") : null;
-            var text_ = (el.textContent||"").replace(/\s+/g," ").trim().slice(0,40);
-            var alabel_ = el.getAttribute ? el.getAttribute("aria-label") : null;
-            var title_ = el.getAttribute ? el.getAttribute("title") : null;
-            var imgalt_ = el.querySelector ? (function(){var i=el.querySelector("img");return i?i.alt:""})() : "";
-            var svgtitle_ = el.querySelector ? (function(){var t=el.querySelector("svg title");return t?t.textContent.trim():""})() : "";
-            var pname_ = typeof el.pathname !== "undefined" ? el.pathname : "N/A";
-            axLog("name", "EMPTY " + rule.as + " " + rule.select +
-                " el=" + el.tagName.toLowerCase() + (el.id ? "#"+el.id : "") +
-                " text=" + JSON.stringify(text_) +
-                " aria-label=" + JSON.stringify(alabel_) +
-                " title=" + JSON.stringify(title_) +
-                " img.alt=" + JSON.stringify(imgalt_) +
-                " svg.title=" + JSON.stringify(svgtitle_) +
-                " href=" + href_ +
-                " pathname=" + pname_);
-        }
-        return "";
+        // Array of tokens — try each in order
+        return extractName(el, rule.nameFrom);
     }
 
     // ── Matcher registry ────────────────────────────────────────
@@ -533,72 +498,72 @@ var axAutobindgen = (function () {
 
     var BUILTIN_RULES = [
         // Structural contexts — prefer existing identifiers, fall back to tag type
-        { select: "form", as: "ctx", nameFrom: "el.id || el.name || el.getAttribute('aria-label') || el.querySelector('legend')?.textContent?.trim()?.slice(0,30) || 'form'" },
-        { select: "nav", as: "ctx", nameFrom: "el.getAttribute('aria-label') || linkList(el) || shortText(el).slice(0,24) || 'nav'" },
-        { select: "main", as: "ctx", nameFrom: "el.getAttribute('aria-label') || 'main'" },
-        { select: "header", as: "ctx", nameFrom: "el.getAttribute('aria-label') || el.querySelector('h1,h2,h3,h4,h5,h6')?.textContent?.replace(/\\s+/g,' ').trim().slice(0,24) || shortText(el).slice(0,24) || 'header'" },
-        { select: "footer", as: "ctx", nameFrom: "el.getAttribute('aria-label') || shortText(el).slice(0,24) || 'footer'" },
-        { select: "table", as: "ctx", nameFrom: "el.id || el.getAttribute('aria-label') || el.querySelector('caption')?.textContent?.trim()?.slice(0,30) || 'table'" },
-        { select: "article", as: "ctx", nameFrom: "el.id || el.getAttribute('aria-label') || el.querySelector('h1,h2,h3,h4')?.textContent?.replace(/\\s+/g,' ').trim().slice(0,30) || shortText(el).slice(0,30) || 'article'" },
-        { select: "section", as: "ctx", nameFrom: "el.id || el.getAttribute('aria-label') || el.querySelector('h1,h2,h3,h4')?.textContent?.replace(/\\s+/g,' ').trim().slice(0,30) || shortText(el).slice(0,30) || 'section'" },
-        { select: "[role='dialog']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || 'dialog'" },
-        { select: "[role='main']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || 'main'" },
-        { select: "[role='navigation']", as: "ctx", nameFrom: "el.getAttribute('aria-label') || linkList(el) || 'navigation'" },
-        { select: "[role='listbox']", as: "view", nameFrom: "el.getAttribute('aria-label') || 'listbox'" },
+        { select: "form", as: "ctx", nameFrom: ["$id", "$name", "@aria-label", ">legend", "form"] },
+        { select: "nav", as: "ctx", nameFrom: ["@aria-label", "links", "text:24", "nav"] },
+        { select: "main", as: "ctx", nameFrom: ["@aria-label", "main"] },
+        { select: "header", as: "ctx", nameFrom: ["@aria-label", ">h1,h2,h3,h4,h5,h6", "text:24", "header"] },
+        { select: "footer", as: "ctx", nameFrom: ["@aria-label", "text:24", "footer"] },
+        { select: "table", as: "ctx", nameFrom: ["$id", "@aria-label", ">caption", "table"] },
+        { select: "article", as: "ctx", nameFrom: ["$id", "@aria-label", ">h1,h2,h3,h4", "text:30", "article"] },
+        { select: "section", as: "ctx", nameFrom: ["$id", "@aria-label", ">h1,h2,h3,h4", "text:30", "section"] },
+        { select: "[role='dialog']", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", "dialog"] },
+        { select: "[role='main']", as: "ctx", nameFrom: ["@aria-label", "main"] },
+        { select: "[role='navigation']", as: "ctx", nameFrom: ["@aria-label", "links", "navigation"] },
+        { select: "[role='listbox']", as: "view", nameFrom: ["@aria-label", "listbox"] },
 
         // Navigation — all <a> elements
         // Non-navigational anchors (href="javascript:...", href="#") are buttons, not links.
-        { select: "a[href^='javascript:']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.getAttribute('title') || 'button'" },
-        { select: "a[href^='#']", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'link'" },
-        { select: "a[href]", as: "nav", nameFrom: "el.getAttribute('aria-label') || el.getAttribute('title') || shortText(el) || (el.querySelector('img')?el.querySelector('img').alt:'') || (el.querySelector('svg title')?el.querySelector('svg title').textContent.trim():'') || el.pathname.replace(/[\\/\\-_]/g,' ').trim().slice(0,40) || el.hostname || 'link'" },
-        { select: "[role='link']", as: "nav", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'link'" },
+        { select: "a[href^='javascript:']", as: "click", nameFrom: ["@aria-label", "text", "@title", "button"] },
+        { select: "a[href^='#']", as: "nav", nameFrom: ["text", "@aria-label", "@title", "link"] },
+        { select: "a[href]", as: "nav", nameFrom: ["@aria-label", "@title", "text", ">img@alt", ">svg title@text", "$pathname", "$hostname", "link"] },
+        { select: "[role='link']", as: "nav", nameFrom: ["text", "@aria-label", "@title", "link"] },
 
         // Clickable elements
-        { select: "button", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || el.getAttribute('aria-label') || el.getAttribute('title') || 'button'" },
-        { select: "button[type='submit']", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || el.getAttribute('aria-label') || 'submit'" },
-        { select: "input[type='submit']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'submit'" },
-        { select: "input[type='button']", as: "click", nameFrom: "(el.value || '').trim().slice(0,40) || 'button'" },
-        { select: "[role='button']", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || el.getAttribute('aria-label') || el.getAttribute('title') || 'button'" },
+        { select: "button", as: "click", nameFrom: ["text", "@aria-label", "@title", "button"] },
+        { select: "button[type='submit']", as: "click", nameFrom: ["text", "@aria-label", "submit"] },
+        { select: "input[type='submit']", as: "click", nameFrom: ["$value", "submit"] },
+        { select: "input[type='button']", as: "click", nameFrom: ["$value", "button"] },
+        { select: "[role='button']", as: "click", nameFrom: ["text", "@aria-label", "@title", "button"] },
         // Data-action attributes — many JS frameworks (Amazon, Bootstrap, jQuery)
         // use data-action="*" to attach click handlers to non-button elements.
         // These are interactive even without native onclick/role attributes.
-        { select: "[data-action]", as: "click", nameFrom: "shortText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || 'clickable'" },
+        { select: "[data-action]", as: "click", nameFrom: ["text", "@aria-label", "@title", "clickable"] },
 
         // Interactive ARIA roles — elements like autocomplete suggestions, menu items,
         // tabs, tree items, switches. These are clickable by definition even without
         // native <a>/<button> elements or explicit onclick attributes.
-        { select: "[role='option']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'option'" },
-        { select: "[role='menuitem']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'menuitem'" },
-        { select: "[role='tab']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'tab'" },
-        { select: "[role='treeitem']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'treeitem'" },
-        { select: "[role='switch']", as: "click", nameFrom: "el.getAttribute('aria-label') || shortText(el) || el.innerText?.trim()?.slice(0,40) || 'switch'" },
-        { select: "[onclick]", as: "click", nameFrom: "shortText(el) || el.innerText?.trim()?.slice(0,60) || 'clickable'" },
-        { select: "input[type='checkbox']", as: "click", nameFrom: "el.labels?.length ? shortText(el.labels[0]) : el.value || el.name || 'checkbox'" },
-        { select: "input[type='radio']", as: "click", nameFrom: "el.labels?.length ? shortText(el.labels[0]) : el.value || el.name || 'radio'" },
+        { select: "[role='option']", as: "click", nameFrom: ["@aria-label", "text", "option"] },
+        { select: "[role='menuitem']", as: "click", nameFrom: ["@aria-label", "text", "menuitem"] },
+        { select: "[role='tab']", as: "click", nameFrom: ["@aria-label", "text", "tab"] },
+        { select: "[role='treeitem']", as: "click", nameFrom: ["@aria-label", "text", "treeitem"] },
+        { select: "[role='switch']", as: "click", nameFrom: ["@aria-label", "text", "switch"] },
+        { select: "[onclick]", as: "click", nameFrom: ["text", "clickable"] },
+        { select: "input[type='checkbox']", as: "click", nameFrom: ["label", "$value", "$name", "checkbox"] },
+        { select: "input[type='radio']", as: "click", nameFrom: ["label", "$value", "$name", "radio"] },
 
         // Editable inputs
         { select: "input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='checkbox']):not([type='radio'])",
           as: "edit",
-          nameFrom: "el.placeholder || el.name || el.id || el.getAttribute('aria-label') || el.type" },
-        { select: "textarea", as: "edit", nameFrom: "el.placeholder || el.name || el.id || 'textarea'" },
-        { select: "select", as: "edit", nameFrom: "el.name || el.id || el.getAttribute('aria-label') || 'select'" },
-        { select: "[contenteditable='true']", as: "edit", nameFrom: "el.id || el.getAttribute('aria-label') || 'editable'" },
+          nameFrom: ["$placeholder", "$name", "$id", "@aria-label", "$type"] },
+        { select: "textarea", as: "edit", nameFrom: ["$placeholder", "$name", "$id", "textarea"] },
+        { select: "select", as: "edit", nameFrom: ["$name", "$id", "@aria-label", "select"] },
+        { select: "[contenteditable='true']", as: "edit", nameFrom: ["$id", "@aria-label", "editable"] },
 
         // Viewable text
-        { select: "h1", as: "view", nameFrom: "shortText(el)" },
-        { select: "h2", as: "view", nameFrom: "shortText(el)" },
-        { select: "h3", as: "view", nameFrom: "shortText(el)" },
-        { select: "label", as: "view", nameFrom: "shortText(el)" },
-        { select: "th", as: "view", nameFrom: "shortText(el)" },
-        { select: "td", as: "view", nameFrom: "shortText(el)" },
-        { select: "p", as: "view", nameFrom: "shortText(el)" },
-        { select: "img[alt]", as: "view", nameFrom: "(el.alt || '').trim().slice(0,60)" },
-        { select: "figcaption", as: "view", nameFrom: "shortText(el)" },
-        { select: "[aria-label]", as: "view", nameFrom: "(el.getAttribute('aria-label') || '').trim().slice(0,60)" },
-        { select: "[aria-describedby]", as: "view", nameFrom: "(el.getAttribute('aria-describedby') || '').trim().slice(0,60)" },
-        { select: "span", as: "view", nameFrom: "shortText(el)" },
-        { select: "strong", as: "view", nameFrom: "shortText(el)" },
-        { select: "em", as: "view", nameFrom: "shortText(el)" },
+        { select: "h1", as: "view", nameFrom: ["text"] },
+        { select: "h2", as: "view", nameFrom: ["text"] },
+        { select: "h3", as: "view", nameFrom: ["text"] },
+        { select: "label", as: "view", nameFrom: ["text"] },
+        { select: "th", as: "view", nameFrom: ["text"] },
+        { select: "td", as: "view", nameFrom: ["text"] },
+        { select: "p", as: "view", nameFrom: ["text"] },
+        { select: "img[alt]", as: "view", nameFrom: ["$alt"] },
+        { select: "figcaption", as: "view", nameFrom: ["text"] },
+        { select: "[aria-label]", as: "view", nameFrom: ["@aria-label"] },
+        { select: "[aria-describedby]", as: "view", nameFrom: ["@aria-describedby"] },
+        { select: "span", as: "view", nameFrom: ["text"] },
+        { select: "strong", as: "view", nameFrom: ["text"] },
+        { select: "em", as: "view", nameFrom: ["text"] },
 
         // Ignore hidden/unimportant
         { select: "[aria-hidden='true']", as: "ignore" },

@@ -80,7 +80,12 @@ export interface Ax {
 
     scan(root?: Element): AxScan;
     process(root?: Element): AxScan;
-    invoke(scope: string | undefined, el: Element, action: string, args?: any): AxInvokeResult;
+    invoke(
+        scope: string | undefined,
+        el: Element,
+        action: string,
+        args?: any,
+    ): AxInvokeResult;
     invoke(el: Element, action: string, args?: any): AxInvokeResult;
     getNodeId(el: Element): string | null;
     watch(callback?: (mutations: MutationRecord[]) => void): MutationObserver;
