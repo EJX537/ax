@@ -202,26 +202,17 @@ const ax = (function () {
     function getOrAssignId(el, seenIds) {
         if (el.id) {
             if (seenIds.has(el.id)) {
-                console.warn(
-                    'ax: duplicate id "' +
-                        el.id +
-                        '" on <' +
-                        el.tagName.toLowerCase() +
-                        ">, generating fallback",
-                );
-                let fallback = elementPathHash(el);
-                if (seenIds.has(fallback)) {
-                    fallback = "ax-" + ++idCounter;
-                }
+                // Duplicate DOM id — silently generate a unique fallback
+                var fallback = "ax-" + ++idCounter;
                 elementToId.set(el, fallback);
                 return fallback;
             }
             seenIds.add(el.id);
             return el.id;
         }
-        const existing = elementToId.get(el);
+        var existing = elementToId.get(el);
         if (existing) return existing;
-        let id = elementPathHash(el);
+        var id = elementPathHash(el);
         // Handle collision — append counter if hash already used this scan
         if (seenIds.has(id)) {
             id = "ax-" + ++idCounter;
@@ -536,38 +527,6 @@ const ax = (function () {
          * @param {boolean} ignore - whether subtree is ax-ignored
          */
         function walk(el, parent, scope, _ignore) {
-
-
-            // Skip hidden/non-interactable elements and their subtrees.
-            if (typeof el.checkVisibility === "function" && !el.checkVisibility()) {
-                return;
-            }
-            // Check various computed-style properties that make elements
-            // invisible or non-interactable (not covered by checkVisibility).
-            if (el !== r) {
-                var style = window.getComputedStyle(el);
-                if (style.opacity === "0" || style.pointerEvents === "none") {
-                    return;
-                }
-                // Zero-area rect: element has no visible box (e.g. height:0;overflow:hidden)
-                if (typeof el.getClientRects === "function") {
-                    var rects = el.getClientRects();
-                    if (rects.length === 0) {
-                        return;
-                    }
-                    var hasArea = false;
-                    for (var ri = 0; ri < rects.length; ri++) {
-                        if (rects[ri].width > 0 && rects[ri].height > 0) {
-                            hasArea = true;
-                            break;
-                        }
-                    }
-                    if (!hasArea) {
-                        return;
-                    }
-                }
-            }
-
             const attrs = readAXAttrs(el);
             const entries = readPrimitiveEntries(attrs);
 
@@ -588,14 +547,30 @@ const ax = (function () {
             /** @type {InternalNode | null} */
             let node = null;
 
-            if (isHtml || isScopeBoundary || hasPrimitives || isFrame) {
+            // Track scope for children (hoisted for body early-return below)
+            var childScope =
+                ctxAttr && ctxAttr.trim() ? ctxAttr.trim() : scope;
+
+            // Skip structural container body — its children show directly under html.
+            if (el.tagName === 'BODY') {
+                var childEls2 = el.children;
+                var ci2 = 0;
+                var clen2 = childEls2.length;
+                for (; ci2 < clen2; ci2++) {
+                    walk(childEls2[ci2], parent, childScope);
+                }
+                return; // body is transparent — no node created
+            }
+
+            // Every element becomes a tree node, regardless of annotations.
+            {
                 const id = getOrAssignId(el, seenIds);
                 localKeyMap.set(el, id);
 
                 /** @type {AxFnEntry[]} */
                 const fn = [];
 
-                // Build fn entries from primitives
+                // Build fn entries from primitives (annotations)
                 let ei = 0;
                 const elen = entries.length;
                 for (; ei < elen; ei++) {
@@ -624,8 +599,8 @@ const ax = (function () {
                     fn.push({ on: "frame", name: frameName });
                 }
 
-                // Check if element was annotated by autobindgen (has data-ax-bindgen)
-                const isBindgen = el.hasAttribute("data-ax-bindgen");
+                // Check if element was annotated by autobindgen (has ax-bindgen)
+                const isBindgen = el.hasAttribute("ax-bindgen");
 
                 node = {
                     id: id,
@@ -670,17 +645,13 @@ const ax = (function () {
                 parent = node;
             }
 
-            // Track scope for children
-            const childScope =
-                ctxAttr && ctxAttr.trim() ? ctxAttr.trim() : scope;
-
             // Recurse children (only element children, not text nodes)
-            // Use indexed for loop instead of Array.from() / for-of
             // Skip iframe/frame — their content is a separate document
-            if (!isFrame) {
-            const childEls = el.children;
-            let ci = 0;
-            const clen = childEls.length;
+            // Skip children of ignored elements entirely
+            if (!isFrame && !el.hasAttribute("ax-ignore")) {
+            var childEls = el.children;
+            var ci = 0;
+            var clen = childEls.length;
             for (; ci < clen; ci++) {
                 walk(childEls[ci], parent, childScope);
             }
@@ -741,6 +712,31 @@ const ax = (function () {
                             }
                         }
                     }
+                }
+
+                // Post-order: collapse transparent containers (no own fn entries).
+                // Re-parent children to grandparent so empty structural wrappers
+                // don't clutter the AX tree.
+                if (node.fn.length === 0 && node._parent && el.tagName !== 'HTML') {
+                    var gp = node._parent;
+                    var kids = node._children.slice(); // copy to avoid mutation
+                    for (var ci = 0; ci < kids.length; ci++) {
+                        kids[ci]._parent = gp;
+                        gp._children.push(kids[ci]);
+                    }
+                    // Remove self from parent
+                    var selfIdx = gp._children.indexOf(node);
+                    if (selfIdx !== -1) gp._children.splice(selfIdx, 1);
+                    node._parent = null;
+                    node._children = [];
+                    // Remove from buildScan
+                    for (var sni = 0; sni < buildScan.nodes.length; sni++) {
+                        if (buildScan.nodes[sni].id === node.id) {
+                            buildScan.nodes.splice(sni, 1);
+                            break;
+                        }
+                    }
+                    delete buildScan.dag[node.id];
                 }
             }
         }

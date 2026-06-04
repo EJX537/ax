@@ -497,76 +497,7 @@ var axAutobindgen = (function () {
     // (new Function is blocked by page CSP).
 
     var BUILTIN_RULES = [
-        // Structural contexts — prefer existing identifiers, fall back to tag type
-        { select: "form", as: "ctx", nameFrom: ["$id", "$name", "@aria-label", ">legend", "form"] },
-        { select: "nav", as: "ctx", nameFrom: ["@aria-label", "links", "text:24", "nav"] },
-        { select: "main", as: "ctx", nameFrom: ["@aria-label", "main"] },
-        { select: "header", as: "ctx", nameFrom: ["@aria-label", ">h1,h2,h3,h4,h5,h6", "text:24", "header"] },
-        { select: "footer", as: "ctx", nameFrom: ["@aria-label", "text:24", "footer"] },
-        { select: "table", as: "ctx", nameFrom: ["$id", "@aria-label", ">caption", "table"] },
-        { select: "article", as: "ctx", nameFrom: ["$id", "@aria-label", ">h1,h2,h3,h4", "text:30", "article"] },
-        { select: "section", as: "ctx", nameFrom: ["$id", "@aria-label", ">h1,h2,h3,h4", "text:30", "section"] },
-        { select: "[role='dialog']", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", "dialog"] },
-        { select: "[role='main']", as: "ctx", nameFrom: ["@aria-label", "main"] },
-        { select: "[role='navigation']", as: "ctx", nameFrom: ["@aria-label", "links", "navigation"] },
-        { select: "[role='listbox']", as: "view", nameFrom: ["@aria-label", "listbox"] },
-
-        // Navigation — all <a> elements
-        // Non-navigational anchors (href="javascript:...", href="#") are buttons, not links.
-        { select: "a[href^='javascript:']", as: "click", nameFrom: ["@aria-label", "text", "@title", "button"] },
-        { select: "a[href^='#']", as: "nav", nameFrom: ["text", "@aria-label", "@title", "link"] },
-        { select: "a[href]", as: "nav", nameFrom: ["@aria-label", "@title", "text", ">img@alt", ">svg title@text", "$pathname", "$hostname", "link"] },
-        { select: "[role='link']", as: "nav", nameFrom: ["text", "@aria-label", "@title", "link"] },
-
-        // Clickable elements
-        { select: "button", as: "click", nameFrom: ["text", "@aria-label", "@title", "button"] },
-        { select: "button[type='submit']", as: "click", nameFrom: ["text", "@aria-label", "submit"] },
-        { select: "input[type='submit']", as: "click", nameFrom: ["$value", "submit"] },
-        { select: "input[type='button']", as: "click", nameFrom: ["$value", "button"] },
-        { select: "[role='button']", as: "click", nameFrom: ["text", "@aria-label", "@title", "button"] },
-        // Data-action attributes — many JS frameworks (Amazon, Bootstrap, jQuery)
-        // use data-action="*" to attach click handlers to non-button elements.
-        // These are interactive even without native onclick/role attributes.
-        { select: "[data-action]", as: "click", nameFrom: ["text", "@aria-label", "@title", "clickable"] },
-
-        // Interactive ARIA roles — elements like autocomplete suggestions, menu items,
-        // tabs, tree items, switches. These are clickable by definition even without
-        // native <a>/<button> elements or explicit onclick attributes.
-        { select: "[role='option']", as: "click", nameFrom: ["@aria-label", "text", "option"] },
-        { select: "[role='menuitem']", as: "click", nameFrom: ["@aria-label", "text", "menuitem"] },
-        { select: "[role='tab']", as: "click", nameFrom: ["@aria-label", "text", "tab"] },
-        { select: "[role='treeitem']", as: "click", nameFrom: ["@aria-label", "text", "treeitem"] },
-        { select: "[role='switch']", as: "click", nameFrom: ["@aria-label", "text", "switch"] },
-        { select: "[onclick]", as: "click", nameFrom: ["text", "clickable"] },
-        { select: "input[type='checkbox']", as: "click", nameFrom: ["label", "$value", "$name", "checkbox"] },
-        { select: "input[type='radio']", as: "click", nameFrom: ["label", "$value", "$name", "radio"] },
-
-        // Editable inputs
-        { select: "input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='checkbox']):not([type='radio'])",
-          as: "edit",
-          nameFrom: ["$placeholder", "$name", "$id", "@aria-label", "$type"] },
-        { select: "textarea", as: "edit", nameFrom: ["$placeholder", "$name", "$id", "textarea"] },
-        { select: "select", as: "edit", nameFrom: ["$name", "$id", "@aria-label", "select"] },
-        { select: "[contenteditable='true']", as: "edit", nameFrom: ["$id", "@aria-label", "editable"] },
-
-        // Viewable text
-        { select: "h1", as: "view", nameFrom: ["text"] },
-        { select: "h2", as: "view", nameFrom: ["text"] },
-        { select: "h3", as: "view", nameFrom: ["text"] },
-        { select: "label", as: "view", nameFrom: ["text"] },
-        { select: "th", as: "view", nameFrom: ["text"] },
-        { select: "td", as: "view", nameFrom: ["text"] },
-        { select: "p", as: "view", nameFrom: ["text"] },
-        { select: "img[alt]", as: "view", nameFrom: ["$alt"] },
-        { select: "figcaption", as: "view", nameFrom: ["text"] },
-        { select: "[aria-label]", as: "view", nameFrom: ["@aria-label"] },
-        { select: "[aria-describedby]", as: "view", nameFrom: ["@aria-describedby"] },
-        { select: "span", as: "view", nameFrom: ["text"] },
-        { select: "strong", as: "view", nameFrom: ["text"] },
-        { select: "em", as: "view", nameFrom: ["text"] },
-
-        // Ignore hidden/unimportant
-        { select: "[aria-hidden='true']", as: "ignore" },
+        // ── IGNORE: non-content, structural, hidden ─────────────────
         { select: "script", as: "ignore" },
         { select: "style", as: "ignore" },
         { select: "meta", as: "ignore" },
@@ -574,6 +505,104 @@ var axAutobindgen = (function () {
         { select: "noscript", as: "ignore" },
         { select: "br", as: "ignore" },
         { select: "hr", as: "ignore" },
+        { select: "head", as: "ignore" },
+        { select: "[aria-hidden='true']", as: "ignore" },
+
+        // ── EDIT: form controls (auto-adds +click for focus) ─────
+        { select: "textarea", as: "edit", nameFrom: ["@aria-label", "label", "@placeholder", "@title", "textarea"] },
+        { select: "input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']):not([type='checkbox']):not([type='radio']):not([type='file'])", as: "edit", nameFrom: ["@aria-label", "label", "@placeholder", "@title", "input"] },
+        { select: "input[type='checkbox']", as: "edit", nameFrom: ["@aria-label", "^label@text", "text", "checkbox"] },
+        { select: "input[type='radio']", as: "edit", nameFrom: ["@aria-label", "^label@text", "text", "radio"] },
+        { select: "input[type='file']", as: "edit", nameFrom: ["@aria-label", "@title", "file-upload"] },
+        { select: "select", as: "edit", nameFrom: ["@aria-label", "label", "$innerText|truncate:40", "select"] },
+        { select: "[contenteditable]", as: "edit", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "editable"] },
+        { select: "[role='textbox'],[role='searchbox']", as: "edit", nameFrom: ["@aria-label", "label", "@placeholder", "@title", "input"] },
+        { select: "[role='combobox']", as: "edit", nameFrom: ["@aria-label", "label", "@placeholder", "@title", "$innerText|truncate:40", "combo"] },
+        { select: "[role='spinbutton']", as: "edit", nameFrom: ["@aria-label", "@aria-valuenow", "@title", "spinbutton"] },
+        { select: "[role='slider']", as: "edit", nameFrom: ["@aria-label", "@aria-valuetext", "@aria-valuenow", "slider"] },
+
+        // ── CLICK: interactive actions (in-page state changes) ───
+        // Explicit ARIA interactive roles (native form controls already matched above)
+        { select: "[role='button']", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText", "button"] },
+        { select: "[role='tab']", as: "click", nameFrom: ["@aria-label", "text", "$innerText", "tab"] },
+        { select: "[role='menuitem']", as: "click", nameFrom: ["@aria-label", "text", "$innerText", "menu-item"] },
+        { select: "[role='menuitemcheckbox'],[role='menuitemradio']", as: "click", nameFrom: ["@aria-label", "text", "$innerText", "menu-item"] },
+        { select: "[role='switch']", as: "click", nameFrom: ["@aria-label", "text", "switch"] },
+        { select: "[role='checkbox']", as: "click", nameFrom: ["@aria-label", "text", "checkbox"] },
+        { select: "[role='radio']", as: "click", nameFrom: ["@aria-label", "text", "radio"] },
+        { select: "[role='option']", as: "click", nameFrom: ["@aria-label", "text", "option"] },
+        { select: "[role='treeitem']", as: "click", nameFrom: ["@aria-label", "text", "tree-item"] },
+
+        // Native buttons
+        { select: "button", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "button"] },
+        { select: "input[type='submit']", as: "click", nameFrom: ["@value", "@aria-label", "text", "submit"] },
+        { select: "input[type='button']", as: "click", nameFrom: ["@value", "@aria-label", "text", "button"] },
+        { select: "input[type='reset']", as: "click", nameFrom: ["@value", "@aria-label", "text", "reset"] },
+        { select: "input[type='image']", as: "click", nameFrom: ["@alt", "@aria-label", "@title", "image-button"] },
+
+        // JavaScript anchors = buttons (definitely not nav)
+        { select: "a[href^='javascript:']", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "button"] },
+
+        // Page-internal hash anchors = buttons (no real navigation)
+        { select: "a[href='#'],a[href^='#']", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "button"] },
+
+        // Inline event handlers
+        { select: "[onclick]", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "clickable"] },
+        { select: "[ondblclick],[onmousedown],[onpointerdown]", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "clickable"] },
+
+        // Framework data attributes (generic click trigger patterns)
+        { select: "[data-action]", as: "click", nameFrom: ["@aria-label", "@data-action", "text", "$innerText|truncate:40", "action"] },
+        { select: "[data-toggle]", as: "click", nameFrom: ["@aria-label", "@data-toggle", "text", "toggle"] },
+        { select: "[data-behavior]", as: "click", nameFrom: ["@aria-label", "@data-behavior", "text", "behavior"] },
+
+        // Disclosure widgets (details/summary, aria-expanded)
+        { select: "details > summary", as: "click", nameFrom: ["text", "$innerText|truncate:40", "expand"] },
+        { select: "[aria-expanded]", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "toggle"] },
+        { select: "[aria-haspopup]", as: "click", nameFrom: ["@aria-label", "text", "$innerText|truncate:40", "dropdown"] },
+
+        // role=link is interactive click (may or may not navigate)
+        { select: "[role='link']", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "link"] },
+
+        // ── NAV: guaranteed URL navigation ────────────────────────
+        // External absolute URLs
+        { select: "a[href^='http://'],a[href^='https://']", as: "nav", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "$pathname", "link"] },
+        // Relative paths
+        { select: "a[href^='/']", as: "nav", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "$pathname", "link"] },
+        // Other real hrefs (not #, javascript:, or empty)
+        { select: "a[href]:not([href='#']):not([href^='#']):not([href^='javascript:']):not([href=''])", as: "nav", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "$pathname", "link"] },
+        // Image map areas
+        { select: "area[href]", as: "nav", nameFrom: ["@alt", "@aria-label", "@title", "link"] },
+
+        // ── CTX: scope boundaries (containers with semantic meaning) ─
+        { select: "nav,[role='navigation']", as: "ctx", nameFrom: ["@aria-label", "links", "nav", "navigation"] },
+        { select: "main,[role='main']", as: "ctx", name: "main" },
+        { select: "section", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", "^label@text", ">h1@text", ">h2@text", "section"] },
+        { select: "article", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", ">h1@text", ">h2@text", "article"] },
+        { select: "aside,[role='complementary']", as: "ctx", nameFrom: ["@aria-label", "@title", "sidebar"] },
+        { select: "form", as: "ctx", nameFrom: ["@aria-label", "@title", "^label@text", "form"] },
+        { select: "fieldset", as: "ctx", nameFrom: ["legend", "@aria-label", "@title", "fieldset"] },
+        { select: "[role='dialog'],[role='alertdialog'],dialog", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", "dialog"] },
+        { select: "[role='tablist']", as: "ctx", nameFrom: ["@aria-label", "tabs"] },
+        { select: "[role='menu'],[role='menubar']", as: "ctx", nameFrom: ["@aria-label", "menu"] },
+        { select: "[role='toolbar']", as: "ctx", nameFrom: ["@aria-label", "toolbar"] },
+        { select: "[role='tree']", as: "ctx", nameFrom: ["@aria-label", "tree"] },
+        { select: "[role='grid'],[role='table'],table", as: "ctx", nameFrom: ["@aria-label", "caption", "grid"] },
+        { select: "[role='region'],[role='group']", as: "ctx", nameFrom: ["@aria-label", "@aria-labelledby", "region"] },
+        { select: "ol,ul", as: "ctx", nameFrom: ["@aria-label", "@title", "list"] },
+        { select: "header", as: "ctx", nameFrom: ["@aria-label", "links", "header"] },
+        { select: "footer", as: "ctx", nameFrom: ["@aria-label", "links", "footer"] },
+
+        // ── VIEW: read-only content display ──────────────────────
+        { select: "img[alt]", as: "view", nameFrom: ["@alt", "@aria-label", "@title", "image"] },
+        { select: "h1", as: "view", nameFrom: ["text", "$innerText|truncate:40", "heading"] },
+        { select: "h2,h3,h4,h5,h6,[role='heading']", as: "view", nameFrom: ["text", "$innerText|truncate:40", "heading"] },
+        { select: "label", as: "view", nameFrom: ["text", "label"] },
+        { select: "p", as: "view", nameFrom: ["text", "$innerText|truncate:40", "paragraph"] },
+        { select: "li", as: "view", nameFrom: ["text", "$innerText|truncate:40", "item"] },
+        { select: "td,th", as: "view", nameFrom: ["text", "$innerText|truncate:40", "cell"] },
+        { select: "figcaption", as: "view", nameFrom: ["text", "caption"] },
+        { select: "[role='status'],[role='log'],[role='timer']", as: "view", nameFrom: ["@aria-label", "text", "status"] },
+        { select: "[role='img'],[role='figure']", as: "view", nameFrom: ["@aria-label", "@title", "image"] },
     ];
 
     // ── DOM annotation ──────────────────────────────────────────
@@ -583,9 +612,14 @@ var axAutobindgen = (function () {
      */
     function bind(root) {
         root = root || document.documentElement;
+
+        // No rules configured — skip all annotation work entirely
+        if ((!rules || rules.length === 0) && (!useBuiltins || !BUILTIN_RULES || BUILTIN_RULES.length === 0)) {
+            return;
+        }
+
         annotationOrder = [];
         annotated = new WeakMap();
-
         // Tags that are never useful to annotate — skip immediately
         var SKIP_TAGS = { br:1, hr:1, wbr:1, template:1, slot:1, base:1, link:1, meta:1, source:1, track:1, param:1, area:1, col:1, colgroup:1 };
         // Remove all previous bindgen annotations
@@ -638,7 +672,7 @@ var axAutobindgen = (function () {
                     }
                 }
                 if (hc) {
-                    el.setAttribute(prefix + "-ignore", "hidden");
+                    el.setAttribute(prefix + "-ignore", "always");
                     continue;
                 }
             }
@@ -673,7 +707,7 @@ var axAutobindgen = (function () {
      */
     function applyAnnotation(el, rule) {
         if (rule.as === "ignore") {
-            el.setAttribute(prefix + "-ignore", "ignored");
+            el.setAttribute(prefix + "-ignore", "always");
             return;
         }
 
