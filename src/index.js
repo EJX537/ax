@@ -647,8 +647,11 @@ const ax = (function () {
 
             // Recurse children (only element children, not text nodes)
             // Skip iframe/frame — their content is a separate document
-            // Skip children of ignored elements entirely
-            if (!isFrame && !el.hasAttribute("ax-ignore")) {
+            // Skip children of permanently-ignored elements entirely.
+            // ignore="hidden" elements still get children walked since
+            // they may become visible later (SPA patterns).
+            var ignoreVal = el.getAttribute("ax-ignore");
+            if (!isFrame && ignoreVal !== "always") {
             var childEls = el.children;
             var ci = 0;
             var clen = childEls.length;
@@ -714,29 +717,134 @@ const ax = (function () {
                     }
                 }
 
-                // Post-order: collapse transparent containers (no own fn entries).
-                // Re-parent children to grandparent so empty structural wrappers
-                // don't clutter the AX tree.
-                if (node.fn.length === 0 && node._parent && el.tagName !== 'HTML') {
-                    var gp = node._parent;
-                    var kids = node._children.slice(); // copy to avoid mutation
-                    for (var ci = 0; ci < kids.length; ci++) {
-                        kids[ci]._parent = gp;
-                        gp._children.push(kids[ci]);
-                    }
-                    // Remove self from parent
-                    var selfIdx = gp._children.indexOf(node);
-                    if (selfIdx !== -1) gp._children.splice(selfIdx, 1);
-                    node._parent = null;
-                    node._children = [];
-                    // Remove from buildScan
-                    for (var sni = 0; sni < buildScan.nodes.length; sni++) {
-                        if (buildScan.nodes[sni].id === node.id) {
-                            buildScan.nodes.splice(sni, 1);
-                            break;
+                // Reverse subsume: if a pure view parent (all own fn entries are
+                // view type, no click/nav/edit of its own) has exactly one
+                // actionable leaf child (click/nav/edit), absorb the child's
+                // fn entries into the parent and remove the child.
+                // This turns <li view="X">→<a click="X"> into just <li view|click X>.
+                var isViewParent = node.fn.length > 0;
+                for (var vpi = 0; isViewParent && vpi < node.fn.length; vpi++) {
+                    if (node.fn[vpi].on !== 'view') { isViewParent = false; }
+                }
+                if (isViewParent && node._children.length === 1) {
+                    var onlyChild = node._children[0];
+                    if (onlyChild._children.length === 0) {
+                        var hasActionable = false;
+                        for (var aci = 0; aci < onlyChild.fn.length; aci++) {
+                            var f = onlyChild.fn[aci];
+                            if (f.on === 'click' || f.on === 'nav' || f.on === 'edit') { hasActionable = true; }
+                        }
+                        if (hasActionable) {
+                            // Absorb child fn into parent
+                            for (var aci2 = 0; aci2 < onlyChild.fn.length; aci2++) {
+                                node.fn.push(onlyChild.fn[aci2]);
+                            }
+                            // Remove child from tree
+                            node._children = [];
+                            onlyChild._parent = null;
+                            for (var sni2 = 0; sni2 < buildScan.nodes.length; sni2++) {
+                                if (buildScan.nodes[sni2].id === onlyChild.id) {
+                                    buildScan.nodes.splice(sni2, 1);
+                                    break;
+                                }
+                            }
+                            delete buildScan.dag[onlyChild.id];
                         }
                     }
-                    delete buildScan.dag[node.id];
+                }
+
+                // Post-order: transparent container handling.
+                // If a transparent element (no own fn entries) has 2+ annotated
+                // children, promote it to a synthetic view boundary so structural
+                // grouping is preserved (e.g., grid rows with a click and an image).
+                // Otherwise, collapse and re-parent children to grandparent.
+                if (node.fn.length === 0 && node._parent && el.tagName !== 'HTML') {
+                    // Count non-synthetic annotated children only.
+                    // Synthetic children (themselves promoted) should not
+                    // trigger cascading promotion of their parent.
+                    // Children with only ignore-type fn entries are also
+                    // excluded — they are non-interactive (scripts, hidden
+                    // inputs) and shouldn't create view boundaries.
+                    var annotatedChildCount = 0;
+                    for (var akc = 0; akc < node._children.length; akc++) {
+                        var child = node._children[akc];
+                        if (child.fn.length > 0 && !child._synthetic) {
+                            var allIgnore = true;
+                            for (var ick = 0; ick < child.fn.length; ick++) {
+                                if (child.fn[ick].on !== 'ignore') { allIgnore = false; break; }
+                            }
+                            if (!allIgnore) annotatedChildCount++;
+                        }
+                    }
+                    if (annotatedChildCount >= 2) {
+                        // Promote to synthetic view boundary
+                        // Derive a human-readable name from:
+                        // 1. aria-label/title (explicit semantic name)
+                        // 2. id attribute (meaningful IDs are semantic)
+                        // 3. The names of annotated children (most useful
+                        //    for an LLM to navigate the tree)
+                        // 4. Semantic role attribute
+                        // 5. tagName as last resort
+                        var bName = el.getAttribute('aria-label') || el.getAttribute('title') || el.id || '';
+                        if (!bName) {
+                            var role = el.getAttribute('role');
+                            if (role && role !== 'presentation' && role !== 'none') {
+                                bName = role;
+                            }
+                        }
+                        if (!bName || bName.length < 3) {
+                            // Collect names from annotated children (up to 3)
+                            var childNames = [];
+                            for (var cn = 0; cn < node._children.length && childNames.length < 3; cn++) {
+                                var ch = node._children[cn];
+                                if (ch.fn.length === 0 || ch._synthetic) continue;
+                                var allIgn = true;
+                                for (var ci2 = 0; ci2 < ch.fn.length; ci2++) {
+                                    if (ch.fn[ci2].on !== 'ignore') { allIgn = false; break; }
+                                }
+                                if (allIgn) continue;
+                                var chName = '';
+                                for (var ci3 = 0; ci3 < ch.fn.length; ci3++) {
+                                    if (ch.fn[ci3].on !== 'ignore') { chName = ch.fn[ci3].name; break; }
+                                }
+                                if (chName) childNames.push(chName);
+                            }
+                            if (childNames.length > 0) {
+                                bName = childNames.join(', ');
+                            } else {
+                                bName = el.tagName.toLowerCase();
+                            }
+                        }
+                        if (bName && typeof bName === 'string') bName = bName.trim().substring(0, 48);
+                        if (!bName) bName = el.tagName.toLowerCase();
+                        node.fn.push({ on: 'view', name: bName });
+                        // Write ax-view attribute to the DOM element so
+                        // findNodeElement() can locate this element by its
+                        // AX ID (it scans for [ax-*] attribute selectors).
+                        try { el.setAttribute('ax-view', bName); } catch (e) {}
+                        // Mark as synthetic so parents don't count us for
+                        // cascading promotion.
+                        node._synthetic = true;
+                    } else {
+                        // Collapse: re-parent children to grandparent
+                        var gp = node._parent;
+                        var kids = node._children.slice();
+                        for (var ci = 0; ci < kids.length; ci++) {
+                            kids[ci]._parent = gp;
+                            gp._children.push(kids[ci]);
+                        }
+                        var selfIdx = gp._children.indexOf(node);
+                        if (selfIdx !== -1) gp._children.splice(selfIdx, 1);
+                        node._parent = null;
+                        node._children = [];
+                        for (var sni = 0; sni < buildScan.nodes.length; sni++) {
+                            if (buildScan.nodes[sni].id === node.id) {
+                                buildScan.nodes.splice(sni, 1);
+                                break;
+                            }
+                        }
+                        delete buildScan.dag[node.id];
+                    }
                 }
             }
         }
@@ -1010,9 +1118,43 @@ const ax = (function () {
             return (el.textContent || "").trim();
         }
         if (action === "click") {
-            /** @type {{ click?: () => void }} */
-            const clickable = /** @type {any} */ (el);
-            if (typeof clickable.click === "function") clickable.click();
+            // Level 1: native click() — works for native form controls
+            // (button, a, input, select, textarea) and opens dropdowns.
+            if (typeof el.click === "function") {
+                el.click();
+            } else {
+                // Level 2: dispatch MouseEvent — works for elements with
+                // JS-bound event listeners (onclick, addEventListener, data-action).
+                const ev = new MouseEvent("click", {
+                    bubbles: true,
+                    cancelable: true,
+                    button: 0,
+                });
+                el.dispatchEvent(ev);
+                // Level 3: reverse-subsume fallback — view parents (like
+                // <li view="X">) that absorbed a child's click/nav don't
+                // have event listeners themselves. Click the actual
+                // interactive descendant instead.
+                if (!ev.defaultPrevented) {
+                    var actionChild = el.querySelector(
+                        "a, button, input, select, textarea, [role='button'], [tabindex='0']"
+                    );
+                    if (actionChild && typeof actionChild.click === "function") {
+                        actionChild.click();
+                    } else if (el.parentElement) {
+                        // Level 4: facade pattern — some elements
+                        // (e.g. Amazon nav-search-facade <div data-value="...">)
+                        // are visual proxies for a native <select> in the same
+                        // container with no event listeners on the facade itself.
+                        var nativeEl = el.parentElement.querySelector(
+                            "select, button, a[href], input, textarea"
+                        );
+                        if (nativeEl && typeof nativeEl.click === "function") {
+                            nativeEl.click();
+                        }
+                    }
+                }
+            }
             return undefined;
         }
         if (
@@ -1049,11 +1191,36 @@ const ax = (function () {
                     // If the event was cancelled or the browser didn't
                     // navigate (e.g. content-script restrictions), fall
                     // back to direct location assignment.
-                    if (ev.defaultPrevented) {
+                    if (!ev.defaultPrevented) {
                         window.location.href = href;
                     }
                 }
                 return href;
+            }
+            // Form input: dispatch Enter key then try to submit the form.
+            // This makes interact on a search/input field trigger the search
+            // instead of just focusing the element.
+            if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.form) {
+                var enterEv = new KeyboardEvent("keydown", {
+                    key: "Enter",
+                    keyCode: 13,
+                    bubbles: true,
+                    cancelable: true,
+                });
+                el.dispatchEvent(enterEv);
+                // If not prevented, try native form submission
+                if (!enterEv.defaultPrevented && el.form) {
+                    try {
+                        if (typeof el.form.requestSubmit === "function") {
+                            el.form.requestSubmit();
+                        } else {
+                            el.form.submit();
+                        }
+                    } catch (e) {
+                        // Fall through to click if submission fails
+                    }
+                }
+                return undefined;
             }
             /** @type {{ click?: () => void }} */
             const clickable = /** @type {any} */ (el);

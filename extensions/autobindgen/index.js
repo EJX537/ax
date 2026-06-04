@@ -551,9 +551,11 @@ var axAutobindgen = (function () {
         { select: "[ondblclick],[onmousedown],[onpointerdown]", as: "click", nameFrom: ["@aria-label", "@title", "text", "$innerText|truncate:40", "clickable"] },
 
         // Framework data attributes (generic click trigger patterns)
-        { select: "[data-action]", as: "click", nameFrom: ["@aria-label", "@data-action", "text", "$innerText|truncate:40", "action"] },
+        { select: "[data-action]", as: "click", nameFrom: ["@aria-label", "text", "$innerText|truncate:40", "action"] },
         { select: "[data-toggle]", as: "click", nameFrom: ["@aria-label", "@data-toggle", "text", "toggle"] },
         { select: "[data-behavior]", as: "click", nameFrom: ["@aria-label", "@data-behavior", "text", "behavior"] },
+        { select: "[data-target]", as: "click", nameFrom: ["@aria-label", "text", "$innerText|truncate:40", "target"] },
+        { select: "[data-modal]", as: "click", nameFrom: ["@aria-label", "text", "$innerText|truncate:40", "modal"] },
 
         // Disclosure widgets (details/summary, aria-expanded)
         { select: "details > summary", as: "click", nameFrom: ["text", "$innerText|truncate:40", "expand"] },
@@ -601,6 +603,7 @@ var axAutobindgen = (function () {
         { select: "li", as: "view", nameFrom: ["text", "$innerText|truncate:40", "item"] },
         { select: "td,th", as: "view", nameFrom: ["text", "$innerText|truncate:40", "cell"] },
         { select: "figcaption", as: "view", nameFrom: ["text", "caption"] },
+        { select: "[data-value]", as: "view", nameFrom: ["text", "$innerText|truncate:40", "select"] },
         { select: "[role='status'],[role='log'],[role='timer']", as: "view", nameFrom: ["@aria-label", "text", "status"] },
         { select: "[role='img'],[role='figure']", as: "view", nameFrom: ["@aria-label", "@title", "image"] },
     ];
@@ -643,37 +646,29 @@ var axAutobindgen = (function () {
             if (SKIP_TAGS[el.tagName.toLowerCase()]) continue;
             if (hasNativeAX(el)) continue;
             if (annotated.has(el)) continue;
-            // Skip hidden/invisible elements — they are not interactable
-            if (el.nodeType === 1) {
+            // Mark hidden/invisible elements with ax-ignore.
+            // Uses only reliable CSS-computed visibility checks.
+            // <select> elements are exempt — they are inherently interactive
+            // even when visually hidden (e.g., Amazon overlays them with
+            // opacity:0 over a visual facade). The facade div gets a view
+            // annotation for display; the <select> gets edit+click for action.
+            if (el.nodeType === 1 && el.tagName !== 'SELECT') {
                 var hc = false;
                 if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkVisibilityCSS: true })) {
                     hc = true;
                 } else if (window.getComputedStyle(el).opacity === "0") {
                     hc = true;
-                } else if (typeof el.getClientRects === "function") {
-                    var rects = el.getClientRects();
-                    if (rects.length === 0) {
-                        hc = true;
-                    } else {
-                        var hasArea = false;
-                        for (var ri = 0; ri < rects.length; ri++) {
-                            if (rects[ri].width > 0 && rects[ri].height > 0) {
-                                hasArea = true;
-                                break;
-                            }
-                        }
-                        if (!hasArea) hc = true;
-                    }
-                }
-                if (!hc) {
+                } else {
                     var bbox = el.getBoundingClientRect();
                     if (bbox.bottom < 0 || bbox.right < 0 || bbox.top > window.innerHeight || bbox.left > window.innerWidth) {
                         hc = true;
                     }
                 }
                 if (hc) {
-                    el.setAttribute(prefix + "-ignore", "always");
-                    continue;
+                    el.setAttribute(prefix + "-ignore", "hidden");
+                    // Don't continue — still annotate hidden elements
+                    // so the tree has their full type/name info even
+                    // when the consumer toggles hidden visibility off.
                 }
             }
             // O(1) lookup from precomputed map
